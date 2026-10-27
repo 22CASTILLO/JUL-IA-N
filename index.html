@@ -386,7 +386,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
     <h1>Finanzas</h1>
     <p id="bloqueo-msg">Introduce tu clave para ver tus datos.</p>
     <input type="text" name="username" value="alberto" autocomplete="username" hidden>
-    <input type="password" id="bloqueo-clave" autocomplete="current-password" placeholder="Clave" required>
+    <input type="password" id="bloqueo-clave" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Clave" required>
+    <label class="recordar"><input type="checkbox" id="bloqueo-ver"> Ver la clave</label>
     <label class="recordar"><input type="checkbox" id="bloqueo-recordar" checked> Recordar en este dispositivo</label>
     <button class="boton" type="submit" id="bloqueo-btn">Entrar</button>
   </form>
@@ -412,9 +413,11 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   const aB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
   const enc = new TextEncoder(), GUARDADA = "finanzas-llave";
   const traer = async f => { const r = await fetch(f, {cache: "no-cache"}); if (!r.ok) throw new Error("red"); return r.json(); };
+  // Mayúsculas, espacios, guiones y tildes no cuentan: «mango hierro koala» = «Mango-Hierro-Koala»
+  const normalizar = f => f.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
   async function abrirLlave(frase){
     const L = await traer("llave.json");
-    const base = await crypto.subtle.importKey("raw", enc.encode(frase), "PBKDF2", false, ["deriveKey"]);
+    const base = await crypto.subtle.importKey("raw", enc.encode(normalizar(frase)), "PBKDF2", false, ["deriveKey"]);
     const k = await crypto.subtle.deriveKey({name: "PBKDF2", salt: b64(L.salt), iterations: L.iter, hash: "SHA-256"}, base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
     return crypto.subtle.decrypt({name: "AES-GCM", iv: b64(L.iv)}, k, b64(L.ct));
   }
@@ -438,6 +441,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
     if (g){ try { arrancar(await descifrar(b64(g).buffer)); return; } catch(e) { try { localStorage.removeItem(GUARDADA); } catch(_) {} } }
     document.getElementById("bloqueo").classList.add("listo");
   })();
+  document.getElementById("bloqueo-ver").addEventListener("change", ev => { document.getElementById("bloqueo-clave").type = ev.target.checked ? "text" : "password"; });
   document.getElementById("bloqueo-form").addEventListener("submit", async ev => {
     ev.preventDefault();
     const btn = document.getElementById("bloqueo-btn"); btn.disabled = true; msg("Abriendo…");
