@@ -45,6 +45,15 @@ const ICO = {
   bajada: '<path d="M12 4v14M6 12l6 6 6-6"/>',
   escudo: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/>',
   tarjeta: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18"/><path d="M15 15h3"/>',
+  pasado: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 3"/>',
+  futuro: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h3v3H8z"/>',
+  herramientas: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  inversiones: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
+  financiacion: '<path d="M3 10l9-6 9 6"/><path d="M5 10v9h14v-9"/><path d="M10 19v-5h4v5"/>',
+  liquidez: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
+  cerrar: '<path d="M6 6l12 12M18 6L6 18"/>',
+  flecha: '<path d="M9 6l6 6-6 6"/>',
 };
 const icono = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICO[k] || ""}</svg>`;
 const cert = c => `<span class="cert ${c}">${ETQ[c] || c}</span>`;
@@ -117,10 +126,9 @@ function prevision(dias, extra){
   for (const f of C.fijos){
     if (f.activo === false) continue;
     for (const d of ocurrencias(f.dia, f.meses, BASE, fin)){
-      let certeza = f.certeza, nota = f.nota || "";
-      if (f.revision && d >= leer(f.revision.desde)){ certeza = "por_confirmar"; nota = f.revision.nota; }
-      if (f.importe == null) ev.push({fecha: d, concepto: f.nombre, importe: null, certeza: "sin_importe", clase: f.tipo, nota, origen: "fijo"});
-      else ev.push({fecha: d, concepto: f.nombre, importe: f.tipo === "ingreso" ? f.importe : -f.importe, certeza, clase: f.tipo, nota, origen: "fijo"});
+      const imp = cuotaEn(f, d), nota = f.nota || "";
+      if (imp == null) ev.push({fecha: d, concepto: f.nombre, importe: null, certeza: "sin_importe", clase: f.tipo, nota, origen: "fijo"});
+      else ev.push({fecha: d, concepto: f.nombre, importe: f.tipo === "ingreso" ? imp : -imp, certeza: f.certeza, clase: f.tipo, nota, origen: "fijo", id: f.id});
     }
   }
   const T = C.tarjetas;
@@ -143,7 +151,7 @@ function prevision(dias, extra){
     // Recordatorio para revisarlo antes del vencimiento (aviso_dias)
     if (v.aviso_dias){ const r = laborable(sumar(d, -v.aviso_dias)); if (r > BASE && r <= fin) ev.push({fecha: r, concepto: "Revisar: " + v.nombre.replace(/^Renovación del /, "").replace(/^seguro/, "Seguro"), importe: null, certeza: "aviso", clase: "aviso", nota: `Vence el ${corta(d)}${v.entidad ? " · " + v.entidad : ""}. Compara precios antes de que renueve solo`, origen: "revision"}); }
     if (d <= BASE || d > fin) continue;
-    if (v.es_cargo) ev.push({fecha: d, concepto: v.nombre, importe: v.importe == null ? null : -v.importe, certeza: v.importe == null ? "sin_importe" : "exacto", clase: "gasto", nota: v.nota, origen: "vencimiento"});
+    if (v.es_cargo) ev.push({fecha: d, concepto: v.nombre, importe: v.importe == null ? null : -v.importe, certeza: v.importe == null ? "sin_importe" : (v.certeza || "exacto"), clase: "gasto", nota: v.nota, origen: "vencimiento"});
     else ev.push({fecha: d, concepto: v.nombre, importe: null, certeza: "aviso", clase: "aviso", nota: v.nota, origen: "vencimiento"});
   }
   // Orden prudente dentro del día: gastos conocidos, sin importe, avisos y, al final, ingresos
@@ -206,27 +214,50 @@ const textoTope = e => e.tope < 0
   ? `Antes de este cargo ya vas a quedar en negativo (${eur(e.tope)} el ${corta(e.topeFecha)}).`
   : `Tope: ${eur(e.tope)}. Si pasa de ahí, el ${corta(e.topeFecha)} te quedas en negativo.`;
 
-// --- Lo que falta para que todo sea exacto
+// --- Lo que falta para que todo sea exacto (discreto: botón de la cabecera).
+// Las tarjetas y lo marcado con no_preguntar no se preguntan: se esperan al extracto.
 function datosQueFaltan(){
-  const p = prevision(120), items = [];
-  const tj = p.sin.find(e => e.origen === "tarjeta");
-  if (tj) items.push({grupo: "Para la previsión", t: `Liquidación de las tarjetas del ${corta(tj.fecha)}`, q: "Importe exacto de la liquidación (en Ruralvía, en el detalle de cada tarjeta). Pásaselo al agente diciendo de dónde sale.", i: "Hasta entonces no se resta y el saldo previsto sale más alto de lo que será. Lo mismo cada mes."});
-  for (const x of C.pendientes.filter(x => x.importe == null))
-    items.push({grupo: "Para la previsión", t: x.nombre, q: "Falta: importe" + (x.fecha ? "" : " y fecha") + ".", i: (x.nota ? x.nota + ". " : "") + "Sin cifra no se puede reservar."});
-  for (const f of C.fijos.filter(f => f.revision))
-    if (p.porConfirmar.some(e => e.concepto === f.nombre))
-      items.push({grupo: "Para la previsión", t: `Cuota nueva: ${f.nombre}`, q: "La comunicación de CRA con el tipo y la cuota desde el " + corta(leer(f.revision.desde)) + ".", i: "Mientras tanto se resta la última real."});
+  const items = [];
+  for (const x of C.pendientes.filter(x => x.importe == null && !x.no_preguntar))
+    items.push({t: x.nombre, q: "Falta: importe" + (x.fecha ? "" : " y fecha"), i: x.nota || ""});
   for (const v of C.vencimientos){
     const falta = [];
     if (!v.fecha) falta.push(v.mes ? "día exacto" : "fecha");
     if (v.es_cargo && v.importe == null) falta.push("importe");
-    if (falta.length) items.push({grupo: "Vencimientos y renovaciones", t: v.nombre, q: "Falta: " + falta.join(" e ") + ".", i: v.nota || ""});
+    if (falta.length) items.push({t: v.nombre, q: "Falta: " + falta.join(" e "), i: v.nota || ""});
   }
-  for (const b of C.bienes.filter(b => b.valor == null))
-    items.push({grupo: "Patrimonio", t: b.nombre, q: "Falta: saldo o valor actual.", i: b.nota || ""});
-  for (const q of C.preguntas || [])
-    items.push({grupo: "Preguntas abiertas", t: q.texto, q: "", i: q.por_que || ""});
+  for (const b of C.bienes.filter(b => b.valor == null)) items.push({t: b.nombre, q: "Falta: valor actual", i: b.nota || ""});
+  for (const q of C.preguntas || []) items.push({t: q.texto, q: "", i: q.por_que || ""});
   return items;
+}
+
+// --- Deudas con cuadro de amortización: cuota del mes y capital pendiente tras la última cuota pasada
+const deudaDe = id => C.deudas.find(d => d.id === id);
+function cuotaEn(f, d){
+  if (!f.cuadro) return f.importe;
+  const deu = deudaDe(f.cuadro), x = deu && deu.cuadro && deu.cuadro.find(x => x.fecha.slice(0, 7) === ym(d));
+  return x ? x.cuota : f.importe;
+}
+function filaCuadro(deu, d){ let r = null; for (const x of deu.cuadro || []) if (leer(x.fecha) <= d) r = x; return r; }
+const pendienteDe = deu => { const x = deu.cuadro ? filaCuadro(deu, BASE) : null; return x ? x.pendiente : deu.pendiente; };
+
+// --- Posición líquida: cuenta + todo lo que es medianamente líquido (efectivo, capital social, fondos, acciones). El piso no.
+function posicionLiquida(){
+  const partes = [{id: "cuenta", n: "Cuenta Caja Rural", v: ULT.saldo, d: "Real a " + corta(BASE), ic: "cuenta"}];
+  for (const b of C.bienes) if (b.liquido) partes.push({id: b.id, n: b.nombre, v: b.valor, d: b.nota || "", ic: b.id === "efectivo" ? "liquidez" : "escudo"});
+  const inv = C.inversiones || [];
+  if (inv.length) for (const i of inv) partes.push({id: i.id, n: i.nombre, v: i.valor, d: i.nota || "", ic: "inversiones"});
+  else partes.push({id: "inv", n: "Fondos y acciones", v: 0, d: "Aún no tienes", ic: "inversiones"});
+  const total = r2(partes.filter(x => x.v != null).reduce((a, x) => a + x.v, 0));
+  const comprometido = r2(C.pendientes.filter(x => x.importe != null && x.clase !== "cobro").reduce((a, x) => a + x.importe, 0));
+  return {partes, total, comprometido, libre: r2(total - comprometido)};
+}
+function patrimonio(){
+  const liq = posicionLiquida(), inm = C.bienes.filter(b => !b.liquido && b.valor != null);
+  const deudas = C.deudas.map(d => ({...d, viva: pendienteDe(d)}));
+  const activos = r2(liq.total + inm.reduce((a, b) => a + b.valor, 0));
+  const pasivos = r2(deudas.reduce((a, d) => a + d.viva, 0) + liq.comprometido);
+  return {liq, inm, deudas, activos, pasivos, neto: r2(activos - pasivos)};
 }
 
 /* =========================================================
@@ -383,145 +414,214 @@ function graficoBarras(hueco, items, total, etiqueta){
   conTooltip(hueco);
 }
 
+// Saldo real día a día (Pasado): línea en escalón con máximo y mínimo marcados
+function graficoHistoria(hueco, dias){
+  const W = Math.max(320, hueco.clientWidth || 900), estrecho = W < 560, H = estrecho ? 220 : 270;
+  const M = {t: 22, r: estrecho ? 12 : 24, b: 30, l: estrecho ? 54 : 66}, n = dias.length;
+  if (n < 2){ hueco.innerHTML = `<p class="sub">Aún no hay días suficientes.</p>`; return; }
+  const vals = dias.map(d => d.saldo), vmin0 = Math.min(0, ...vals), vmax0 = Math.max(...vals), paso = pasoNice(vmax0 - vmin0);
+  const vmin = Math.floor(vmin0 / paso) * paso, vmax = Math.ceil(vmax0 * 1.06 / paso) * paso;
+  const x = i => M.l + (W - M.l - M.r) * (i / (n - 1)), y = v => M.t + (H - M.t - M.b) * (1 - (v - vmin) / (vmax - vmin));
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" tabindex="0" aria-label="Saldo real del ${corta(dias[0].fecha)} al ${corta(dias[n - 1].fecha)}">`;
+  for (let v = vmin; v <= vmax; v += paso) s += `<line x1="${M.l}" x2="${W - M.r}" y1="${y(v)}" y2="${y(v)}" stroke="${v === 0 ? "var(--tinta-2)" : "var(--raya-2)"}"/><text x="${M.l - 8}" y="${y(v) + 4}" text-anchor="end" class="num">${eur0(v)}</text>`;
+  dias.forEach((d, i) => { const dd = d.fecha.getDate(); if (dd === 1 || (dd === 15 && !estrecho)) s += `<text x="${x(i)}" y="${H - M.b + 18}" text-anchor="middle">${dd} ${MESES[d.fecha.getMonth()]}</text>`; });
+  let path = `M ${x(0)} ${y(vals[0])}`; for (let i = 1; i < n; i++) path += ` H ${x(i)} V ${y(vals[i])}`;
+  s += `<path d="${path} V ${y(Math.max(vmin, 0))} H ${x(0)} Z" fill="var(--serie-wash)"/><path d="${path}" fill="none" stroke="var(--serie)" stroke-width="2.2" stroke-linejoin="round"/>`;
+  const iMx = vals.indexOf(Math.max(...vals)), iMn = vals.lastIndexOf(Math.min(...vals));
+  for (const [i, t] of [[iMx, "Máx."], [iMn, "Mín."]]){
+    const px = x(i), py = y(vals[i]), izq = px > W * .7, abajo = t === "Mín." && py < H - M.b - 30;
+    s += `<circle cx="${px}" cy="${py}" r="4.5" fill="var(--serie)" stroke="var(--hoja)" stroke-width="2"/><text x="${px + (izq ? -8 : 8)}" y="${abajo ? py + 18 : py - 9}" text-anchor="${izq ? "end" : "start"}" paint-order="stroke" stroke="var(--hoja)" stroke-width="4" style="fill:var(--tinta);font-weight:700" class="num">${t} ${eur0(vals[i])} · ${corta(dias[i].fecha)}</text>`;
+  }
+  s += `<line class="cur" x1="0" x2="0" y1="${M.t}" y2="${H - M.b}" stroke="var(--tinta-2)" visibility="hidden"/><rect class="zona" x="${M.l}" y="${M.t}" width="${W - M.l - M.r}" height="${H - M.t - M.b}" fill="transparent"/></svg>`;
+  hueco.innerHTML = s;
+  const svg = hueco.querySelector("svg"), cur = svg.querySelector(".cur"), fig = hueco.closest("figure"), tt = tooltipEn(fig);
+  svg.querySelector(".zona").addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect(), k = r.width / W, i = Math.max(0, Math.min(n - 1, Math.round(((ev.clientX - r.left) / k - M.l) / (W - M.l - M.r) * (n - 1)))), q = dias[i];
+    cur.setAttribute("x1", x(i)); cur.setAttribute("x2", x(i)); cur.setAttribute("visibility", "visible");
+    const fr = fig.getBoundingClientRect();
+    tt.mostrar(`<b>${esc(cap(larga(q.fecha)))}</b><div class="fila"><span>Saldo</span><b class="num">${eur(q.saldo)}</b></div>${q.mov.length ? `<div class="fila"><span>${plural(q.mov.length, "movimiento", "movimientos")}</span><span class="num">${eur(r2(q.mov.reduce((a, m) => a + m.importe, 0)), true)}</span></div>` : ""}`, r.left - fr.left + x(i) * k, r.top - fr.top + y(q.saldo) * k);
+  });
+  svg.querySelector(".zona").addEventListener("pointerleave", () => { tt.ocultar(); cur.setAttribute("visibility", "hidden"); });
+}
+
 /* =========================================================
-   PESTAÑAS
+   PIEZAS
    ========================================================= */
-const PESTANAS = [
-  ["inicio", "Inicio"], ["calendario", "Calendario"], ["prevision", "Previsión"], ["comprar", "¿Puedo comprarlo?"], ["movimientos", "Movimientos"],
-  ["gastos", "Gastos"], ["recurrentes", "Recurrentes"], ["global", "Global"], ["faltan", "Datos que faltan"],
-];
-const ESTADO = {horizonte: 60, mesCal: ym(HOY > BASE ? HOY : BASE), diaSel: null, mesGastos: null, filtro: {mes: "", cat: "", q: "", tipo: ""},
+const ESTADO = {verTodos: false, horizonte: 60, futuro: "lista", mesCal: ym(HOY > BASE ? HOY : BASE), diaSel: null, mesPasado: null, filtro: {cat: "", q: "", tipo: ""},
   compra: {que: "", importe: "", fecha: iso(sumar(HOY > BASE ? HOY : BASE, 1)), forma: "cuenta", tipo: "consumo", cuota: "", plazo: "", entrada: "", reventa: "", ingreso: ""}, evaluada: false};
-try { const g = JSON.parse(localStorage.getItem("estado-finanzas") || "{}"); if ([30, 60, 90, 180].includes(g.horizonte)) ESTADO.horizonte = g.horizonte; } catch(e) {}
-const guardar = () => { try { localStorage.setItem("estado-finanzas", JSON.stringify({horizonte: ESTADO.horizonte})); } catch(e) {} };
+try { const g = JSON.parse(localStorage.getItem("estado-finanzas") || "{}"); if ([30, 60, 90, 180].includes(g.horizonte)) ESTADO.horizonte = g.horizonte; if (["lista", "calendario"].includes(g.futuro)) ESTADO.futuro = g.futuro; } catch(e) {}
+const guardar = () => { try { localStorage.setItem("estado-finanzas", JSON.stringify({horizonte: ESTADO.horizonte, futuro: ESTADO.futuro})); } catch(e) {} };
 
 function veredicto(p){
   const colchon = COLCHON_BASE(), m = p.min;
-  if (m.saldo < 0) return {clase: "malo", t: `En negativo el ${corta(m.fecha)}`, h: `El ${corta(m.fecha)} te quedas en negativo: <span class="cifra">${eur(m.saldo)}</span>.`};
-  if (m.saldo < colchon) return {clase: "justo", t: "Por debajo del colchón", h: `No llegas al colchón: el ${corta(m.fecha)} te quedan <span class="cifra">${eur(m.saldo)}</span>.`};
-  return {clase: "bueno", t: "Todo en orden", h: `El saldo no baja de <span class="cifra">${eur(m.saldo)}</span> hasta el ${corta(p.fin)}.`};
+  if (m.saldo < 0) return {clase: "malo", t: "No llegas", h: `El ${corta(m.fecha)} te quedas en negativo`};
+  if (m.saldo < colchon) return {clase: "justo", t: "Llegas, sin colchón", h: `El ${corta(m.fecha)} bajas de tu colchón`};
+  return {clase: "bueno", t: "Llegas con colchón", h: `El saldo no baja del colchón hasta el ${corta(p.fin)}`};
 }
-
-function selectorHorizonte(){
-  return `<span class="segmentos" role="group" aria-label="Horizonte de la previsión">${[30, 60, 90, 180].map(d => `<button type="button" data-horizonte="${d}" aria-pressed="${ESTADO.horizonte === d}">${d} d</button>`).join("")}</span>`;
-}
-
-// Mes en curso frente al anterior hasta el mismo día del mes
-function esteMes(){
-  const meses = resumenMeses(), m = meses[meses.length - 1], ant = meses[meses.length - 2];
-  const hastaDia = m.completo ? 31 : m.hasta.getDate();
-  let antGasto = null;
-  if (ant){ antGasto = 0; for (const x of MOVS) if (x.fecha.startsWith(ant.k) && x.f.getDate() <= hastaDia && x.tipo === "gasto") antGasto -= x.importe; antGasto = r2(antGasto); }
-  const cats = Object.entries(m.porCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  return {m, ant, hastaDia, antGasto, cats};
-}
+const selectorHorizonte = () => `<span class="segmentos" role="group" aria-label="Horizonte">${[30, 60, 90, 180].map(d => `<button type="button" data-horizonte="${d}" aria-pressed="${ESTADO.horizonte === d}">${d} d</button>`).join("")}</span>`;
+const seg = (k, obj, sel) => `<span class="segmentos" role="group">${Object.entries(obj).map(([v, n]) => `<button type="button" data-${k}="${v}" aria-pressed="${sel === v}">${Array.isArray(n) ? n[0] : n}</button>`).join("")}</span>`;
 function barrasHtml(items, max){
   return `<div class="barras">${items.map(it => `<div><div class="bt"><span>${esc(it.n)}</span><b class="num">${eur0(it.v)}</b></div><div class="medidor fino"><i style="width:${Math.max(1.5, it.v / max * 100)}%;background:${it.color || "var(--serie)"}"></i></div></div>`).join("")}</div>`;
 }
-// Anillo de progreso (0–1)
-function anillo(frac, color){
+function anillo(frac, color, texto){
   const r = 22, c = 2 * Math.PI * r, f = Math.max(0, Math.min(1, frac));
-  return `<svg class="anillo" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="${r}" fill="none" stroke="var(--raya-2)" stroke-width="7"/><circle cx="28" cy="28" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 28 28)"/><text x="28" y="32" text-anchor="middle" font-size="13" font-weight="800" style="fill:var(--tinta)">${Math.round(f * 100)}%</text></svg>`;
+  return `<svg class="anillo" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="${r}" fill="none" stroke="var(--raya-2)" stroke-width="7"/><circle cx="28" cy="28" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 28 28)"/><text x="28" y="32" text-anchor="middle" font-size="12" font-weight="800" style="fill:var(--tinta)">${texto ?? Math.round(f * 100) + "%"}</text></svg>`;
 }
-// Fila de movimiento previsto, estilo app
+// Fila de un movimiento previsto
 function filaMov(e, conSaldo){
   const tipo = e.certeza === "sin_importe" ? "sin" : e.certeza === "aviso" ? "ven" : e.certeza === "hipotesis" ? "hip" : e.importe > 0 ? "ing" : "gas";
   const ic = {sin: "?", ven: "!", hip: "◆", ing: "↑", gas: "↓"}[tipo];
-  const sub = e.certeza === "sin_importe" ? (e.tope != null ? (e.tope < 0 ? "Sin importe · ya sin margen" : `Sin importe · tope ${eur0(e.tope)}`) : "Sin importe")
+  const sub = e.certeza === "sin_importe" ? (e.origen === "tarjeta" ? "Sin restar hasta ver la liquidación" : "Sin importe · no se resta")
     : e.certeza === "aviso" ? (e.origen === "revision" ? "Recordatorio" : "Aviso") : ETQ[e.certeza];
   return `<li class="mov ${tipo}"><span class="fd"><b>${e.fecha.getDate()}</b>${MESES[e.fecha.getMonth()]}</span><span class="mi" aria-hidden="true">${ic}</span>
     <span class="mc"><span class="mn">${esc(e.concepto)}</span><span class="ms">${esc(sub)}</span></span>
-    <span class="mv"><b class="num ${e.importe > 0 ? "positivo" : e.importe == null && tipo === "sin" ? "mal" : ""}">${e.importe == null ? (tipo === "sin" ? "¿?" : "") : eur(e.importe, true)}</b>${conSaldo && e.importe != null ? `<span class="num">${eur0(e.saldo)}</span>` : ""}</span></li>`;
+    <span class="mv"><b class="num ${e.importe > 0 ? "positivo" : tipo === "sin" ? "mal" : ""}">${e.importe == null ? (tipo === "sin" ? "¿?" : "") : eur(e.importe, true)}</b>${conSaldo && e.importe != null ? `<span class="num">${eur0(e.saldo)}</span>` : ""}</span></li>`;
 }
+const listaAlertas = l => `<ul class="alertas">${l.map(a => `<li class="${a.nivel}"><span class="ico" aria-hidden="true">${a.nivel === "info" ? "i" : "!"}</span><span>${esc(a.texto)}</span></li>`).join("")}</ul>`;
 
-function vistaInicio(el){
-  const p = prevision(ESTADO.horizonte), v = veredicto(p), fm = fijosMensuales(), colchon = COLCHON_BASE(), avs = avisos(p);
-  const tj = p.sin.find(e => e.origen === "tarjeta"), hist = historiaSaldo(30);
-  const em = esteMes(), mes = em.m, margen = r2(fm.ing - fm.gas);
-  const reservado = r2(C.pendientes.filter(x => x.importe != null && x.clase !== "cobro").reduce((a, x) => a + x.importe, 0));
-  const nomina = p.ev.find(e => e.origen === "fijo" && e.clase === "ingreso" && /nómina/i.test(e.concepto));
-  const prox = p.ev.filter(e => e.fecha <= sumar(BASE, 31));
-  const dif = em.antGasto != null ? r2(mes.gastos - em.antGasto) : null, fracCol = p.min.saldo / colchon;
-  const nFaltan = datosQueFaltan().length;
-  el.innerHTML = `
-    <div class="heroe ${v.clase}"><div class="fila-h">
-      <div>
-        <span class="estado"><i></i>${v.t}</span>
-        <div class="n" style="margin-top:14px">Saldo en cuenta</div>
-        <div class="grande num">${eur(ULT.saldo)}</div>
-        <div class="pills">
-          <span class="pill ${p.min.saldo < colchon ? "rojo" : ""}">Día más justo <b class="num">${eur(p.min.saldo)}</b> ${corta(p.min.fecha)}</span>
-          ${nomina ? `<span class="pill">Nómina <b class="num">${eur(nomina.importe, true)}</b> ${corta(nomina.fecha)}</span>` : ""}
-          ${reservado ? `<span class="pill">Comprometido <b class="num">${eur(reservado)}</b></span>` : ""}
-        </div>
-      </div>
-      <div class="saldo-h"><div class="n">Últimos 30 días · real</div>${sparkSaldo(hist)}<div class="d">Datos hasta el ${corta(BASE)}</div></div>
-    </div></div>
-    <div class="cifras">
-      <div class="${fracCol < 1 ? "alerta" : "ok"} con-anillo">${anillo(fracCol, fracCol >= 1 ? "var(--bien)" : fracCol > .5 ? "var(--aviso)" : "var(--critico)")}<div><div class="n">${fracCol < 1 ? "Colchón · te faltan" : "Colchón"}</div><div class="v num ${fracCol < 1 ? "mal" : "bien"}">${fracCol < 1 ? eur0(colchon - p.min.saldo) : "Completo"}</div><div class="d">Objetivo ${eur0(colchon)}</div></div></div>
-      <div class="${tj ? "alerta" : "ok"}"><div class="n"><span class="ic">${icono("tarjeta")}</span>Tarjetas ${tj ? corta(tj.fecha) : ""}</div><div class="v num ${tj ? "mal" : ""}">${tj ? "¿?" : "—"}</div><div class="d">${tj ? (tj.tope < 0 ? "Ya sin margen" : `Tope ${eur0(tj.tope)}`) : "Sin cargos pendientes"}</div></div>
-      <div><div class="n"><span class="ic">${icono("gastos")}</span>Gastado en ${MESES_L[+mes.k.slice(5) - 1]}</div><div class="v num">${eur0(mes.gastos)}</div><div class="d">${dif != null ? `<span class="${dif > 0 ? "mal" : "bien"}">${dif > 0 ? "▲" : "▼"} ${eur0(Math.abs(dif))}</span> vs ${MESES[+em.ant.k.slice(5) - 1]}` : ""}</div></div>
-      <div class="${margen < 0 ? "alerta" : ""}"><div class="n"><span class="ic">${icono("cuenta")}</span>Margen fijo / mes</div><div class="v num ${margen < 0 ? "mal" : ""}">${eur0(margen)}</div><div class="d">${eur0(fm.ing)} − ${eur0(fm.gas)}</div></div>
-    </div>
-    <figure class="grafico"><div class="tit fila-tit"><span>Saldo real y previsto</span>${selectorHorizonte()}</div>${leyendaSaldo(true)}<div class="hueco"></div></figure>
-    <div class="dos">
-      <div class="bloque"><h3>Próximos cargos y cobros <button class="enlace" type="button" data-ir="prevision">Ver todo</button></h3><ul class="movs">${prox.map(e => filaMov(e, true)).join("") || `<li class="sub">Nada en 30 días.</li>`}</ul></div>
-      <div>
-        <div class="bloque"><h3>Alertas <span class="chip">${avs.length}</span></h3><ul class="alertas">${avs.slice(0, 5).map(a => `<li class="${a.nivel}"><span class="ico" aria-hidden="true">${a.nivel === "info" ? "i" : "!"}</span><span>${esc(a.texto)}</span></li>`).join("")}</ul>
-          ${avs.length > 5 ? `<details class="mas"><summary>${avs.length - 5} más</summary><ul class="alertas">${avs.slice(5).map(a => `<li class="${a.nivel}"><span class="ico" aria-hidden="true">${a.nivel === "info" ? "i" : "!"}</span><span>${esc(a.texto)}</span></li>`).join("")}</ul></details>` : ""}
-          ${nFaltan ? `<button class="enlace" type="button" data-ir="faltan" style="margin-top:10px">${nFaltan} datos pendientes →</button>` : ""}</div>
-        <div class="bloque"><h3>En qué gastas · ${MESES_L[+mes.k.slice(5) - 1]} <button class="enlace" type="button" data-ir="gastos">Ver</button></h3>
-          ${em.cats.length ? barrasHtml(em.cats.slice(0, 5).map(([c, v]) => ({n: CAT[c].nombre, v})), em.cats[0][1]) : `<p class="sub">Sin gastos aún.</p>`}</div>
-      </div>
-    </div>`;
-  graficoSaldo(el.querySelector(".hueco"), p, {hist});
-}
-
-function tablaEventos(lista, p){
-  if (!lista.length) return `<p class="sub">No hay movimientos previstos en este periodo.</p>`;
-  let h = `<div class="envuelve"><table><thead><tr><th>Fecha</th><th>Concepto</th><th class="der">Importe</th><th>Certeza</th><th class="der">Saldo</th></tr></thead><tbody>`;
-  h += `<tr><td class="fecha num">${corta(BASE)}</td><td>Saldo de hoy</td><td></td><td>${cert("exacto")}</td><td class="der num"><b>${eur(ULT.saldo)}</b></td></tr>`;
-  let marcado = false;
-  for (const e of lista){
-    const esMin = !marcado && e.importe != null && iso(e.fecha) === iso(p.min.fecha) && e.saldo === p.min.saldo; if (esMin) marcado = true;
-    const cls = esMin ? "minimo" : e.certeza === "sin_importe" ? "sin" : "";
-    const nota = e.certeza === "sin_importe" ? (e.tope < 0 ? "Ya sin margen" : "Tope " + eur(e.tope)) : "";
-    h += `<tr class="${cls}"><td class="fecha num">${corta(e.fecha)}</td><td>${esc(e.concepto)}${nota ? `<span class="etq">${esc(nota)}</span>` : ""}</td>
-      <td class="der num ${e.importe > 0 ? "positivo" : ""} ${e.importe == null && e.certeza === "sin_importe" ? "mal" : ""}">${e.importe == null ? (e.certeza === "aviso" ? "—" : "¿?") : eur(e.importe, true)}</td><td>${cert(e.certeza)}</td>
-      <td class="der num ${e.saldo < 0 ? "mal" : ""}">${e.importe == null ? `<span class="tenue">${eur(e.saldo)}</span>` : `<b>${eur(e.saldo)}</b>`}</td></tr>`;
-  }
-  return h + `</tbody></table></div>`;
-}
-
-// Alertas en una línea, de más a menos grave
+// Alertas, de más a menos grave. Las tarjetas salen siempre en rojo pero no se restan.
 function avisos(p){
   const l = [], colchon = COLCHON_BASE();
   if (p.min.saldo < 0) l.push({nivel: "grave", texto: `Negativo el ${corta(p.min.fecha)}: ${eur(p.min.saldo)}`});
   else if (p.min.saldo < colchon) l.push({nivel: "grave", texto: `Sin colchón el ${corta(p.min.fecha)}: faltan ${eur(r2(colchon - p.min.saldo))}`});
   const tj = p.sin.find(e => e.origen === "tarjeta");
-  if (tj) l.push({nivel: "grave", texto: `Tarjetas del ${corta(tj.fecha)} sin importe · ${tj.tope < 0 ? "sin margen" : "tope " + eur(tj.tope)}`});
-  for (const x of C.pendientes){
-    if (x.importe != null && x.fecha && leer(x.fecha) <= BASE) l.push({nivel: "aviso", texto: `${x.nombre.replace(/^Honorarios compra: /, "")} sin cobrar · ${eur(x.importe)} reservados`});
-    if (!x.fecha || x.importe == null) l.push({nivel: "aviso", texto: `${x.nombre}: ${x.importe == null ? "sin importe" : eur(x.importe)}${x.fecha ? "" : " ni fecha"}`});
-  }
+  if (tj) l.push({nivel: "grave", texto: `Tarjetas del ${corta(tj.fecha)}: sin restar hasta ver la liquidación${tj.tope >= 0 ? ` (margen ${eur0(tj.tope)})` : ""}`});
+  for (const x of C.pendientes) if (x.importe != null && x.fecha && leer(x.fecha) <= BASE) l.push({nivel: "info", texto: `${x.nombre.replace(/^Honorarios compra: /, "Honorarios: ")} aún sin cobrar · ${eur(x.importe)} reservados`});
   for (const e of p.ev.filter(e => e.origen === "revision")) l.push({nivel: "aviso", texto: `${e.concepto} desde el ${corta(e.fecha)}`});
-  const pc = p.porConfirmar[0];
-  if (pc) l.push({nivel: "aviso", texto: `Cuota de la hipoteca por confirmar desde el ${corta(pc.fecha)}`});
   const cerrado = resumenMeses().filter(m => m.completo).pop();
   if (cerrado && cerrado.ahorro < 0) l.push({nivel: "aviso", texto: `${cap(MESES_L[+cerrado.k.slice(5) - 1])} cerró en ${eur(cerrado.ahorro)}`});
   const v = entre(BASE, HOY); if (v > 7) l.push({nivel: "aviso", texto: `Datos de hace ${v} días: pásale un extracto al agente`});
   for (const n of C.notas || []) l.push({nivel: n.nivel === "aviso" ? "aviso" : "info", texto: n.texto});
   return l;
 }
+const proxNomina = p => p.ev.find(e => e.id === "nomina");
+const reservado = () => r2(C.pendientes.filter(x => x.importe != null && x.clase !== "cobro").reduce((a, x) => a + x.importe, 0));
 
-function vistaCalendario(el){
+/* =========================================================
+   PESTAÑAS
+   ========================================================= */
+// INICIO: la foto de hoy. Posición global, bienes, deudas y lo relevante. Lo que viene está en Futuro; lo que pasó, en Pasado.
+function vistaInicio(el){
+  const P = patrimonio(), p = prevision(ESTADO.horizonte), v = veredicto(p), colchon = COLCHON_BASE(), fm = fijosMensuales();
+  const nom = proxNomina(p), hastaNom = nom ? prevision(entre(BASE, nom.fecha)) : null, mn = hastaNom ? hastaNom.min : p.min;
+  const meses = resumenMeses(), mes = meses[meses.length - 1], cerr = meses.filter(m => m.completo).pop();
+  const colMeses = Math.max(0, p.min.saldo) / C.reglas.gastos_fijos_mensuales_colchon, objetivo = C.reglas.colchon_meses_estable || 3;
+  const end = fm.ing ? fm.deuda / fm.ing * 100 : null, lim = C.reglas.tasa_esfuerzo_max_pct;
+  const hip = P.deudas.find(d => d.id === "hipoteca"), filaH = hip && hip.cuadro ? filaCuadro(hip, BASE) : null;
+  const avs = avisos(p);
+  // Composición: lo que tienes frente a lo que debes
+  const tienes = [{n: "Liquidez", v: P.liq.total, c: "#7fd8b5"}, ...P.inm.map(b => ({n: b.id === "piso" ? "Piso" : b.nombre, v: b.valor, c: "#e9c98a"}))];
+  const debes = [...P.deudas.map(d => ({n: d.id === "hipoteca" ? "Hipoteca" : d.nombre.replace("Devolución a mi ", ""), v: d.viva, c: d.id === "hipoteca" ? "#ff9f8f" : "#ffc8bd"})), ...(P.liq.comprometido ? [{n: "Honorarios", v: P.liq.comprometido, c: "#f7d6cf"}] : [])];
+  const tope = Math.max(P.activos, P.pasivos);
+  const barra = l => `<div class="barra">${l.map(x => `<i style="width:${x.v / tope * 100}%;background:${x.c}" title="${esc(x.n)} ${eur0(x.v)}"></i>`).join("")}</div>`;
+  el.innerHTML = `
+    <div class="heroe ${P.neto < 0 ? "justo" : "bueno"}"><div class="fila-h">
+      <div><span class="estado"><i></i>Posición global</span>
+        <div class="n">Patrimonio neto</div><div class="grande num">${eur(P.neto)}</div>
+        <div class="pills"><span class="pill">Tienes <b class="num">${eur0(P.activos)}</b></span><span class="pill">Debes <b class="num">${eur0(P.pasivos)}</b></span>${filaH ? `<span class="pill">Hipoteca amortizada <b class="num">${pct((hip.inicial - filaH.pendiente) / hip.inicial * 100)}</b></span>` : ""}</div></div>
+      <div class="compos">
+        <div class="fila"><span>Tienes</span>${barra(tienes)}<b class="num">${eur0(P.activos)}</b></div>
+        <div class="fila"><span>Debes</span>${barra(debes)}<b class="num">${eur0(P.pasivos)}</b></div>
+        <div class="ley">${tienes.concat(debes).map(x => `<span style="--c:${x.c}">${esc(x.n)}</span>`).join("")}</div>
+      </div>
+    </div></div>
+    <div class="cifras">
+      <button class="tile ${mn.saldo < 0 ? "alerta" : "ok"}" type="button" data-ir="futuro"><div class="n"><span class="ic">${icono("futuro")}</span>${nom ? "Hasta la nómina del " + corta(nom.fecha) : "Próximos " + ESTADO.horizonte + " días"}</div>
+        <div class="v num ${mn.saldo < 0 ? "mal" : ""}">${mn.saldo < 0 ? "No llegas" : "Llegas"}</div><div class="d">Mínimo ${eur0(mn.saldo)} el ${corta(mn.fecha)}</div></button>
+      <button class="tile" type="button" data-ir="pasado"><div class="n"><span class="ic">${icono("pasado")}</span>${cap(MESES_L[+mes.k.slice(5) - 1])}${mes.completo ? "" : " hasta el " + mes.hasta.getDate()}</div>
+        <div class="v num ${mes.ahorro < 0 ? "mal" : "bien"}">${eur(mes.ahorro, true)}</div><div class="d">Ingresos ${eur0(mes.ingresos)} · gastos ${eur0(mes.gastos)}</div></button>
+      <div class="tile ${colMeses < objetivo ? "alerta" : "ok"} con-anillo">${anillo(colMeses / objetivo, colMeses >= objetivo ? "var(--bien)" : colMeses >= objetivo / 2 ? "var(--aviso)" : "var(--critico)", colMeses.toFixed(1).replace(".", ","))}
+        <div><div class="n">Colchón en meses</div><div class="v num">${colMeses.toFixed(1).replace(".", ",")} <span class="tenue" style="font-size:14px">de ${objetivo}</span></div><div class="d">Objetivo ${eur0(colchon)}</div></div></div>
+      <button class="tile ${end > lim ? "alerta" : ""}" type="button" data-ir="financiacion"><div class="n"><span class="ic">${icono("financiacion")}</span>Endeudamiento</div>
+        <div class="v num ${end > lim ? "mal" : end > lim * .85 ? "ojo" : ""}">${pct(end)}</div><div class="d">Cuotas ÷ ingresos fijos · límite ${lim} %</div></button>
+    </div>
+    <div class="mitades">
+      <div class="bloque"><h3>Lo que tienes <span class="total num">${eur(P.activos)}</span></h3><ul class="movs">
+        ${P.liq.partes.map(x => `<li class="mov ing"><span class="mi">${icono(x.ic)}</span><span class="mc"><span class="mn">${esc(x.n)}</span><span class="ms">${esc(x.d)}</span></span><span class="mv"><b class="num">${x.v == null ? "¿?" : eur(x.v)}</b><span>Líquido</span></span></li>`).join("")}
+        ${P.inm.map(b => `<li class="mov oro"><span class="mi">${icono("financiacion")}</span><span class="mc"><span class="mn">${esc(b.nombre)}</span><span class="ms">${esc(b.nota || "")}</span></span><span class="mv"><b class="num">${eur(b.valor)}</b><span>No líquido</span></span></li>`).join("")}
+      </ul></div>
+      <div class="bloque"><h3>Lo que debes <span class="total num">${eur(-P.pasivos)}</span></h3><ul class="movs">
+        ${P.deudas.map(d => { const f = d.cuadro ? filaCuadro(d, BASE) : null, sig = d.cuadro ? d.cuadro.find(x => leer(x.fecha) > BASE) : null;
+          return `<li class="mov sin"><span class="mi">${icono(d.id === "hipoteca" ? "financiacion" : "escudo")}</span><span class="mc"><span class="mn">${esc(d.nombre)}</span><span class="ms">${sig ? `Próxima cuota ${eur(sig.cuota)} el ${corta(leer(sig.fecha))} · ${eur0(sig.intereses)} de intereses` : esc(d.nota || "")}</span></span><span class="mv"><b class="num">${eur(-d.viva)}</b><span>${f ? "a " + corta(leer(f.fecha)) : "Sin cuota"}</span></span></li>`; }).join("")}
+        ${C.pendientes.filter(x => x.importe != null && x.clase !== "cobro").map(x => `<li class="mov ven"><span class="mi">!</span><span class="mc"><span class="mn">${esc(x.nombre)}</span><span class="ms">${leer(x.fecha) <= BASE ? "Vencido, sin cobrar · reservado" : "Vence el " + corta(leer(x.fecha))}</span></span><span class="mv"><b class="num">${eur(-x.importe)}</b><span>Comprometido</span></span></li>`).join("")}
+      </ul></div>
+    </div>
+    <div class="dos">
+      <div class="bloque"><h3>Alertas <span class="chip ${avs.some(a => a.nivel === "grave") ? "rojo" : ""}">${avs.length}</span></h3>${avs.length ? listaAlertas(avs.slice(0, 4)) + (avs.length > 4 ? `<details class="mas"><summary>Ver ${avs.length - 4} más</summary>${listaAlertas(avs.slice(4))}</details>` : "") : `<p class="sub">Nada que vigilar.</p>`}</div>
+      <div class="bloque"><h3>Resultado por mes <button class="enlace" type="button" data-ir="pasado">Pasado →</button></h3>
+        <ul class="lista">${meses.slice().reverse().map(x => `<li><span class="nom">${cap(nombreMes(x.k))}${x.completo ? "" : ` <span class="tenue" style="font-weight:600">· hasta el ${corta(x.hasta)}</span>`}</span><span class="val num ${x.ahorro < 0 ? "mal" : "bien"}">${eur(x.ahorro, true)}</span><span class="det">Ingresos ${eur(x.ingresos)} · gastos ${eur(x.gastos)} · ahorro ${tasa(x)}</span></li>`).join("")}</ul></div>
+    </div>`;
+}
+
+// PASADO: lo que ya pasó. Saldo real, resultado del mes, en qué se gasta y todos los movimientos.
+function vistaPasado(el){
+  const meses = resumenMeses();
+  if (!ESTADO.mesPasado) ESTADO.mesPasado = meses[meses.length - 1].k;
+  const todo = ESTADO.mesPasado === "todo", m = todo ? null : (meses.find(x => x.k === ESTADO.mesPasado) || meses[meses.length - 1]);
+  const ing = todo ? r2(meses.reduce((a, x) => a + x.ingresos, 0)) : m.ingresos, gas = todo ? r2(meses.reduce((a, x) => a + x.gastos, 0)) : m.gastos, res = r2(ing - gas);
+  const porCat = {}; for (const x of todo ? meses : [m]) for (const [c, v] of Object.entries(x.porCat)) porCat[c] = r2((porCat[c] || 0) + v);
+  const cats = Object.entries(porCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const diaAdia = new Set((C.variables.find(v => v.id === "dia-a-dia") || {}).categorias || []);
+  const totalDia = r2(cats.filter(([c]) => diaAdia.has(c)).reduce((a, [, v]) => a + v, 0));
+  const nDias = todo ? entre(MOVS[0].f, BASE) + 1 : (m.completo ? m.finMes.getDate() : m.hasta.getDate());
+  const delPeriodo = MOVS.filter(x => todo || x.fecha.startsWith(m.k));
+  const comercios = {};
+  for (const x of delPeriodo.filter(x => x.tipo === "gasto" && x.importe < 0)){ const k = x.concepto.replace(/\d{3,}/g, "").replace(/\s+/g, " ").trim(); comercios[k] = r2((comercios[k] || 0) - x.importe); }
+  const top = Object.entries(comercios).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const F = ESTADO.filtro;
+  const lista = delPeriodo.filter(x => (!F.cat || x.cat === F.cat) && (!F.tipo || x.tipo === F.tipo) && (!F.q || x.concepto.toLowerCase().includes(F.q.toLowerCase()))).slice().reverse();
+  // Saldo real por día (desde el primer movimiento)
+  const hist = historiaSaldo(entre(MOVS[0].f, BASE) + 1); hist.push({fecha: BASE, saldo: ULT.saldo, mov: MOVS.filter(x => x.fecha === iso(BASE))});
+  const histVer = todo ? hist : hist.filter(d => ym(d.fecha) === m.k);
+  let filas = "", diaAnt = "";
+  const filtrando = F.cat || F.tipo || F.q, corte = ESTADO.verTodos || filtrando ? lista.length : 15;
+  for (const x of lista.slice(0, corte)){
+    if (x.fecha !== diaAnt){ filas += `<li class="dia-sep"><span>${esc(larga(x.f))}</span><span class="num">Saldo ${eur(x.saldo)}</span></li>`; diaAnt = x.fecha; }
+    const t = x.tipo === "ingreso" ? "ing" : x.tipo === "gasto" ? "gas" : "ven";
+    filas += `<li class="mov ${t}"><span class="mi" aria-hidden="true">${t === "ing" ? "↑" : t === "gas" ? "↓" : "↔"}</span><span class="mc"><span class="mn">${esc(x.concepto)}</span><span class="ms">${esc(CAT[x.cat].nombre)}</span></span><span class="mv"><b class="num ${x.importe > 0 ? "positivo" : ""}">${eur(x.importe, true)}</b></span></li>`;
+  }
+  el.innerHTML = `
+    <div class="controles">${seg("mespas", Object.fromEntries([...meses.map(x => [x.k, cap(MESES_L[+x.k.slice(5) - 1]) + (x.completo ? "" : "*")]), ["todo", "Todo"]]), ESTADO.mesPasado)}
+      <span class="tenue" style="font-size:13px">${todo ? "Del " + corta(MOVS[0].f) + " al " + corta(BASE) : m.completo ? "Mes completo" : "* Hasta el " + corta(m.hasta)}</span></div>
+    <div class="cifras">
+      <div class="tile"><div class="n"><span class="ic">${icono("bajada")}</span>Ingresos</div><div class="v num positivo">${eur(ing, true)}</div><div class="d">Nómina, alquileres y otros</div></div>
+      <div class="tile"><div class="n"><span class="ic">${icono("gastos")}</span>Gastos</div><div class="v num">${eur(-gas)}</div><div class="d">Sin compra del piso ni traspasos</div></div>
+      <div class="tile ${res < 0 ? "alerta" : "ok"}"><div class="n"><span class="ic">${icono("cuenta")}</span>Resultado</div><div class="v num ${res < 0 ? "mal" : "bien"}">${eur(res, true)}</div><div class="d">Ahorro ${ing ? pct(res / ing * 100) : "—"}</div></div>
+      <div class="tile"><div class="n"><span class="ic">${icono("tarjeta")}</span>Día a día</div><div class="v num">${eur0(totalDia)}</div><div class="d">${eur(r2(totalDia / nDias))} de media al día</div></div>
+    </div>
+    <figure class="grafico"><div class="tit">Saldo real en la cuenta</div><div class="hueco"></div></figure>
+    <div class="mitades">
+      <div class="bloque"><h3>En qué se va</h3>${cats.length ? barrasHtml(cats.map(([c, v]) => ({n: CAT[c].nombre, v})), cats[0][1]) : `<p class="sub">Sin gastos.</p>`}<p class="nota">Las tarjetas salen como un solo cargo el día 5.</p></div>
+      <div class="bloque"><h3>Dónde más</h3><ul class="lista">${top.map(([k, v]) => `<li><span class="nom" style="font-weight:600">${esc(k)}</span><span class="val num">${eur(-v)}</span></li>`).join("") || `<li><span class="det">Nada.</span></li>`}</ul></div>
+    </div>
+    <div class="bloque"><h3>Movimientos <span class="chip">${lista.length}</span></h3>
+      <div class="controles" style="margin:6px 0 2px">
+        <label>Categoría <select id="f-cat"><option value="">Todas</option>${Object.values(CAT).filter(c => delPeriodo.some(x => x.cat === c.id)).map(c => `<option value="${c.id}" ${F.cat === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select></label>
+        <label>Tipo <select id="f-tipo"><option value="">Todos</option>${[["ingreso","Ingresos"],["gasto","Gastos"],["interno","Entre cuentas"],["compra_piso","Compra del piso"]].map(([k, n]) => `<option value="${k}" ${F.tipo === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label style="flex:1 1 180px">Buscar <input type="search" id="f-q" value="${esc(F.q)}" placeholder="Concepto" style="flex:1"></label>
+      </div>
+      <ul class="movs">${filas || `<li class="sub">Ningún movimiento con ese filtro.</li>`}</ul>${lista.length > corte ? `<button class="enlace" type="button" data-vertodos style="margin-top:10px">Ver los ${lista.length} movimientos</button>` : ""}</div>
+    <details class="metodo"><summary>Mes a mes por categoría</summary><div class="envuelve" style="margin-top:10px"><table><thead><tr><th>Categoría</th>${meses.map(x => `<th class="der">${cap(MESES_L[+x.k.slice(5) - 1])}${x.completo ? "" : "*"}</th>`).join("")}</tr></thead><tbody>
+      ${[...new Set(meses.flatMap(x => Object.keys(x.porCat)))].map(c => `<tr><td>${esc(CAT[c].nombre)}</td>${meses.map(x => `<td class="der num">${x.porCat[c] ? eur(-x.porCat[c]) : "—"}</td>`).join("")}</tr>`).join("")}
+      <tr class="total"><td>Gastos</td>${meses.map(x => `<td class="der num">${eur(-x.gastos)}</td>`).join("")}</tr>
+      <tr><td>Ingresos</td>${meses.map(x => `<td class="der num positivo">${eur(x.ingresos, true)}</td>`).join("")}</tr>
+      <tr><td><b>Resultado</b></td>${meses.map(x => `<td class="der num ${x.ahorro < 0 ? "mal" : "bien"}"><b>${eur(x.ahorro, true)}</b></td>`).join("")}</tr>
+      <tr><td class="tenue">Entre cuentas tuyas</td>${meses.map(x => `<td class="der num tenue">${x.interno ? eur(x.interno, true) : "—"}</td>`).join("")}</tr>
+      <tr><td class="tenue">Compra del piso</td>${meses.map(x => `<td class="der num tenue">${x.compra ? eur(x.compra, true) : "—"}</td>`).join("")}</tr>
+    </tbody></table></div></details>`;
+  graficoHistoria(el.querySelector(".hueco"), histVer);
+  const set = (k, v) => { ESTADO.filtro[k] = v; pintar(); };
+  $("f-cat").onchange = e => set("cat", e.target.value); $("f-tipo").onchange = e => set("tipo", e.target.value);
+  let t; $("f-q").oninput = e => { clearTimeout(t); t = setTimeout(() => { set("q", e.target.value); const i = $("f-q"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); };
+}
+
+// Calendario del mes (Futuro): días pasados con lo real, futuros con lo previsto y el saldo al cerrar el día
+function htmlCalendario(){
   const [yy, mm] = ESTADO.mesCal.split("-").map(Number), primero = new Date(yy, mm - 1, 1), ultimo = new Date(yy, mm, 0);
-  const p = prevision(Math.max(30, entre(BASE, ultimo) + 1)), colchon = COLCHON_BASE();
-  const porDia = {};
+  const p = prevision(Math.max(30, entre(BASE, ultimo) + 1)), colchon = COLCHON_BASE(), porDia = {};
   for (const m of MOVS) (porDia[m.fecha] ||= {real: [], prev: []}).real.push(m);
   for (const e of p.ev) (porDia[iso(e.fecha)] ||= {real: [], prev: []}).prev.push(e);
-  const venMes = C.vencimientos.filter(v => (v.fecha && v.fecha.slice(0, 7) === ESTADO.mesCal) || (!v.fecha && v.mes === ESTADO.mesCal));
-  let h = `<div class="cal-cab"><button type="button" data-cal="-1" aria-label="Mes anterior">‹</button><h3>${cap(nombreMes(ESTADO.mesCal))}</h3><button type="button" data-cal="1" aria-label="Mes siguiente">›</button><button type="button" data-cal="hoy">Hoy</button></div>`;
+  let h = `<div class="cal-cab"><button type="button" data-cal="-1" aria-label="Mes anterior">‹</button><h3>${nombreMes(ESTADO.mesCal)}</h3><button type="button" data-cal="1" aria-label="Mes siguiente">›</button><button type="button" data-cal="hoy">Hoy</button></div>`;
   h += `<div class="cal">` + ["lun","mar","mié","jue","vie","sáb","dom"].map(d => `<div class="dsem">${d}</div>`).join("");
   const desfase = (primero.getDay() + 6) % 7;
   for (let i = 0; i < desfase; i++) h += `<div class="dia fuera" aria-hidden="true"></div>`;
@@ -533,66 +633,127 @@ function vistaCalendario(el){
     let items = "";
     if (pasado){
       const corr = x.real.filter(m => m.tipo === "ingreso" || m.tipo === "gasto");
-      const ent = r2(corr.filter(m => m.importe > 0).reduce((a, m) => a + m.importe, 0));
-      const sal = r2(-corr.filter(m => m.importe < 0).reduce((a, m) => a + m.importe, 0));
+      const ent = r2(corr.filter(m => m.importe > 0).reduce((a, m) => a + m.importe, 0)), sal = r2(-corr.filter(m => m.importe < 0).reduce((a, m) => a + m.importe, 0));
       if (ent) items += `<span class="it ing num">+${eur0(ent)}</span>`;
       if (sal) items += `<span class="it real num">−${eur0(sal)}</span>`;
-      if (x.real.length > corr.length) items += `<span class="it real">↔ entre cuentas</span>`;
     } else {
       for (const e of x.prev.slice(0, 3)) items += `<span class="it ${e.certeza === "sin_importe" ? "sin" : e.certeza === "aviso" ? "ven" : e.importe > 0 ? "ing" : ""}" title="${esc(e.concepto)}">${e.importe == null ? (e.certeza === "aviso" ? "◇ " : "? ") : (e.importe > 0 ? "+" : "−") + eur0(Math.abs(e.importe)) + " "}${esc(e.concepto)}</span>`;
       if (x.prev.length > 3) items += `<span class="it mas">+${x.prev.length - 3} más</span>`;
     }
-    const puntos = pasado ? (x.real.length ? `<span class="punto" style="background:var(--tinta-3)"></span>` : "")
-                          : x.prev.map(e => `<span class="punto" style="background:${e.certeza === "sin_importe" ? "var(--critico)" : e.certeza === "aviso" ? "var(--aviso)" : e.importe > 0 ? "var(--bien)" : "var(--gasto)"}"></span>`).join("");
+    const puntos = pasado ? "" : x.prev.map(e => `<span class="punto" style="background:${e.certeza === "sin_importe" ? "var(--critico)" : e.certeza === "aviso" ? "var(--aviso)" : e.importe > 0 ? "var(--bien)" : "var(--gasto)"}"></span>`).join("");
     h += `<button type="button" class="${cls.join(" ")}" data-dia="${k}" aria-label="${esc(larga(f))}"><span class="nd num">${d}</span>${items}<span>${puntos}</span>${!pasado && saldoDia != null ? `<span class="neto num ${saldoDia < 0 ? "mal" : ""}">${eur0(saldoDia)}</span>` : ""}</button>`;
   }
   for (let i = (desfase + ultimo.getDate()) % 7; i && i < 7; i++) h += `<div class="dia fuera" aria-hidden="true"></div>`;
-  h += `</div><div class="leyenda-cal"><span><b class="positivo">+</b> ingreso</span><span><b>−</b> gasto con importe</span><span class="mal"><b>?</b> cargo sin importe</span><span style="color:var(--aviso)"><b>◇</b> aviso o vencimiento</span><span><span class="muestra"></span>un cargo te deja por debajo del colchón</span><span>Cifra de abajo: saldo previsto al cerrar el día. Días hasta el ${corta(BASE)}: movimientos reales.</span></div>`;
-  let det = `<p class="sub">Elige un día para ver el detalle.</p>`;
+  h += `</div><div class="leyenda-cal"><span><b class="positivo">+</b> ingreso</span><span><b>−</b> gasto</span><span class="mal"><b>?</b> sin importe</span><span style="color:var(--aviso)"><b>◇</b> aviso</span><span><span class="muestra"></span>bajo el colchón</span><span>Cifra de abajo: saldo al cerrar el día</span></div>`;
+  let det = `<p class="sub">Toca un día para ver el detalle.</p>`;
   if (ESTADO.diaSel){
     const f = leer(ESTADO.diaSel), x = porDia[ESTADO.diaSel] || {real: [], prev: []};
     const filas = x.real.map(m => `<li><span class="nom">${esc(m.concepto)}</span><span class="val num ${m.importe > 0 ? "positivo" : ""}">${eur(m.importe, true)}</span><span class="det">Real · ${esc(CAT[m.cat].nombre)}</span></li>`).join("")
-      + x.prev.map(e => `<li><span class="nom">${esc(e.concepto)}</span><span class="val num">${e.importe == null ? (e.certeza === "aviso" ? "—" : "¿?") : eur(e.importe, true)}</span><span class="det">${cert(e.certeza)} ${esc(e.certeza === "sin_importe" ? textoTope(e) : (e.nota || ""))}</span></li>`).join("");
+      + x.prev.map(e => `<li><span class="nom">${esc(e.concepto)}</span><span class="val num ${e.certeza === "sin_importe" ? "mal" : ""}">${e.importe == null ? (e.certeza === "aviso" ? "—" : "¿?") : eur(e.importe, true)}</span><span class="det">${cert(e.certeza)} ${esc(e.nota || "")}</span></li>`).join("");
     det = `<p class="sub"><b>${cap(larga(f))}</b></p><ul class="lista">${filas || `<li><span class="det">Sin movimientos.</span></li>`}</ul>`;
   }
-  const delMes = p.ev.filter(e => ym(e.fecha) === ESTADO.mesCal);
-  const totIn = r2(delMes.filter(e => e.importe > 0).reduce((a, e) => a + e.importe, 0));
-  const totOut = r2(-delMes.filter(e => e.importe < 0).reduce((a, e) => a + e.importe, 0));
-  const nSin = delMes.filter(e => e.certeza === "sin_importe").length;
-  el.innerHTML = `<h2>Calendario</h2><p class="intro">Lo pasado es real; lo que viene, previsto.</p>
-    <div class="dos" style="margin-top:0"><div>${h}</div>
-    <div><div class="bloque"><h3>Detalle del día</h3>${det}</div>
-      <div class="bloque"><h3>Previsto en ${MESES_L[mm - 1]}</h3><ul class="lista">
-        <li><span class="nom">Entradas con importe</span><span class="val num positivo">${eur(totIn, true)}</span></li>
-        <li><span class="nom">Salidas con importe</span><span class="val num">${eur(-totOut)}</span></li>
-        <li><span class="nom">Cargos sin importe</span><span class="val num ${nSin ? "mal" : ""}">${nSin}</span><span class="det">No están restados</span></li></ul></div>
-      <div class="bloque"><h3>Vencimientos de ${MESES_L[mm - 1]}</h3>${venMes.length ? `<ul class="lista">${venMes.map(v => `<li><span class="nom">${esc(v.nombre)}</span><span class="val">${v.fecha ? corta(leer(v.fecha)) : "día sin fijar"}</span><span class="det">${esc(v.nota || "")}</span></li>`).join("")}</ul>` : `<p class="sub">Ninguno con fecha conocida.</p>`}</div>
-    </div></div>
-    <div class="bloque mt"><h3>Todos los vencimientos y renovaciones</h3><div class="envuelve"><table><thead><tr><th>Qué</th><th>Fecha</th><th class="der">Importe</th><th>Nota</th></tr></thead><tbody>
-      ${C.vencimientos.map(v => `<tr class="${!v.fecha || (v.es_cargo && v.importe == null) ? "sin" : ""}"><td><b>${esc(v.nombre)}</b></td><td class="num">${v.fecha ? corta(leer(v.fecha)) + "/" + v.fecha.slice(0, 4) : (v.mes ? cap(nombreMes(v.mes)) + ", día sin fijar" : `<span class="mal">Falta</span>`)}</td><td class="der num">${v.importe != null ? eur(v.importe) : (v.es_cargo ? `<span class="mal">Falta</span>` : "—")}</td><td class="tenue">${esc(v.nota || "")}</td></tr>`).join("")}
-    </tbody></table></div></div>`;
+  return `<div class="dos"><div class="bloque">${h}</div><div class="bloque"><h3>Detalle del día</h3>${det}</div></div>`;
 }
 
-function vistaPrevision(el){
-  const p = prevision(ESTADO.horizonte), colchon = COLCHON_BASE();
-  const faltaCero = p.min.saldo < 0 ? r2(-p.min.saldo) : 0, faltaColchon = Math.max(0, r2(colchon - p.min.saldo));
-  el.innerHTML = `<h2>Previsión</h2><p class="intro">Solo resta importes reales. Lo que no tiene cifra sale con «¿?».</p>
-    <div class="controles"><span class="rot">Previsión a</span>${selectorHorizonte()}</div>
+// FUTURO: ¿llego?, la previsión, el calendario y todo lo que se repite o vence.
+function vistaFuturo(el){
+  const p = prevision(ESTADO.horizonte), v = veredicto(p), colchon = COLCHON_BASE(), fm = fijosMensuales();
+  const nom = proxNomina(p), tj = p.sin.find(e => e.origen === "tarjeta");
+  const largo = prevision(400), prox = id => { const e = largo.ev.find(e => e.id === id); return e ? corta(e.fecha) : "—"; };
+  const proxC = nombre => { const e = largo.ev.find(e => e.concepto === nombre); return e ? corta(e.fecha) : "—"; };
+  let lista = "", mesAnt = "";
+  for (const e of p.ev){ const k = ym(e.fecha); if (k !== mesAnt){ lista += `<li class="mes-sep">${nombreMes(k)}</li>`; mesAnt = k; } lista += filaMov(e, true); }
+  const fijos = C.fijos.filter(f => f.activo !== false), sigEv = id => largo.ev.find(e => e.id === id);
+  const anual = f => f.importe == null ? null : r2(Math.abs(largo.ev.filter(e => e.id === f.id && e.fecha <= sumar(BASE, 365)).reduce((a, e) => a + (e.importe || 0), 0)));
+  el.innerHTML = `
+    <div class="heroe ${v.clase}"><div class="fila-h">
+      <div><span class="estado"><i></i>${v.t}</span>
+        <div class="n">Día más justo · ${corta(p.min.fecha)}</div><div class="grande num">${eur(p.min.saldo)}</div>
+        <div class="pills">${nom ? `<span class="pill">Nómina <b class="num">${eur(nom.importe, true)}</b> ${corta(nom.fecha)}</span>` : ""}<span class="pill">Saldo el ${corta(p.fin)} <b class="num">${eur0(p.final)}</b></span>${tj ? `<span class="pill rojo">Tarjetas ${corta(tj.fecha)} <b>sin restar</b></span>` : ""}</div></div>
+      <div><div class="n" style="margin-bottom:8px">${v.h}. Horizonte:</div>${selectorHorizonte()}</div>
+    </div></div>
+    <figure class="grafico"><div class="tit">Saldo previsto</div>${leyendaSaldo(false)}<div class="hueco"></div></figure>
+    <div class="fila-tit"><span style="font-weight:800;font-size:18px">Lo que viene</span>${seg("modo", {lista: "Lista", calendario: "Calendario"}, ESTADO.futuro)}</div>
+    ${ESTADO.futuro === "calendario" ? htmlCalendario() : `<div class="bloque"><ul class="movs">${lista || `<li class="sub">Nada previsto.</li>`}</ul>
+      <p class="nota">Solo resta importes reales. Lo que no tiene cifra sale con «¿?» y no se resta. Si un día cae en fin de semana, pasa al lunes.</p></div>`}
+    <div class="dos">
+      <div class="bloque"><h3>Cada mes <span class="chip">Margen ${eur0(r2(fm.ing - fm.gas))}/mes</span></h3><ul class="movs">
+        ${fijos.map(f => { const ing = f.tipo === "ingreso", s = sigEv(f.id), imp = s && s.importe != null ? Math.abs(s.importe) : f.importe;
+          const cambio = f.cuadro ? deudaDe(f.cuadro).cuadro.find(x => leer(x.fecha) > BASE && x.cuota !== imp) : null;
+          return `<li class="mov ${ing ? "ing" : "gas"}"><span class="mi" aria-hidden="true">${ing ? "↑" : "↓"}</span><span class="mc"><span class="mn">${esc(f.nombre)}</span><span class="ms">${f.meses ? "Día " + f.dia + " de " + f.meses.map(x => MESES[x - 1]).join(", ") : "Día " + f.dia} · próximo ${prox(f.id)}${cambio ? ` · ${eur(cambio.cuota)} desde ${MESES[leer(cambio.fecha).getMonth()]}` : ""}</span></span>
+            <span class="mv"><b class="num ${ing ? "positivo" : ""}">${imp == null ? "¿?" : eur(ing ? imp : -imp, true)}</b><span class="num">${anual(f) == null ? "" : eur0(anual(f)) + "/año"}</span></span></li>`; }).join("")}
+        <li class="mov sin"><span class="mi">?</span><span class="mc"><span class="mn">${esc(C.tarjetas.nombre)}</span><span class="ms">Día ${C.tarjetas.dia_cargo} · próximo ${proxC(C.tarjetas.nombre)} · se resta al ver la liquidación</span></span><span class="mv"><b class="mal">¿?</b></span></li>
+      </ul><p class="nota">Ingresos fijos ${eur(fm.ing)}/mes · gastos fijos ${eur(fm.gas)}/mes. Sin tarjetas ni día a día.</p></div>
+      <div class="pila">
+        <div class="bloque"><h3>Pagos pendientes</h3><ul class="movs">
+          ${C.pendientes.map(x => `<li class="mov ${x.importe == null ? "sin" : "ven"}"><span class="mi">${x.importe == null ? "?" : "!"}</span><span class="mc"><span class="mn">${esc(x.nombre)}</span><span class="ms">${x.fecha ? (leer(x.fecha) <= BASE ? "Venció el " + corta(leer(x.fecha)) + " · reservado ya" : "Vence el " + corta(leer(x.fecha))) : "Sin fecha"}${x.importe == null ? " · no se resta" : ""}</span></span><span class="mv"><b class="num ${x.importe == null ? "mal" : ""}">${x.importe == null ? "¿?" : eur(-x.importe)}</b></span></li>`).join("")}
+        </ul></div>
+        <div class="bloque"><h3>Vencimientos y renovaciones</h3><ul class="movs">
+          ${C.vencimientos.slice().sort((a, b) => (a.fecha || "9") < (b.fecha || "9") ? -1 : 1).map(x => { const d = x.fecha ? leer(x.fecha) : null, rev = d && x.aviso_dias ? sumar(d, -x.aviso_dias) : null;
+            return `<li class="mov ${x.es_cargo ? "gas" : "ven"}"><span class="fd">${d ? `<b>${d.getDate()}</b>${MESES[d.getMonth()]} ${String(d.getFullYear()).slice(2)}` : "—"}</span><span class="mi">${x.es_cargo ? "↓" : "◇"}</span><span class="mc"><span class="mn">${esc(x.nombre.replace(/^Renovación del /, "Renovación "))}</span><span class="ms">${rev ? "Revisar desde el " + corta(rev) + "/" + String(rev.getFullYear()).slice(2) : ""}${x.entidad ? (rev ? " · " : "") + esc(x.entidad) : ""}${x.es_cargo && x.certeza ? ETQ[x.certeza] : ""}</span></span><span class="mv"><b class="num">${x.importe != null ? eur(-x.importe) : x.es_cargo ? "¿?" : ""}</b></span></li>`; }).join("")}
+        </ul></div>
+      </div>
+    </div>`;
+  graficoSaldo(el.querySelector(".hueco"), p, {});
+}
+
+/* =========================================================
+   HERRAMIENTAS
+   ========================================================= */
+const enDesarrollo = (t, x) => `<div class="desarrollo"><span class="ic">${icono("herramientas")}</span><div><b>${t}</b><p>${x}</p></div></div>`;
+const proximo = (t, x) => `<div class="proximo"><span class="chip oro">En desarrollo</span><b>${t}</b><p>${x}</p></div>`;
+
+function vistaInversiones(el){
+  const p = prevision(ESTADO.horizonte), fm = fijosMensuales(), meses = resumenMeses(), esc6 = escaleraExcedente(p);
+  const inv = C.inversiones || [], tot = r2(inv.reduce((a, i) => a + (i.valor || 0), 0));
+  el.innerHTML = `
+    ${enDesarrollo("Inversiones · en desarrollo", "Aquí irán tus fondos y acciones, el reparto de lo que ahorras cada mes y un scoring según la volatilidad que quieras asumir. Por ahora, lo que ya se puede calcular con tus datos reales.")}
     <div class="cifras">
-      <div><div class="n">Entradas con importe</div><div class="v num positivo">${eur(p.ingresos, true)}</div><div class="d">Hasta el ${corta(p.fin)}</div></div>
-      <div><div class="n">Salidas con importe</div><div class="v num">${eur(-p.gastos)}</div><div class="d">Exactas, último real o por confirmar</div></div>
-      <div><div class="n">Saldo al final</div><div class="v num ${p.final < 0 ? "mal" : ""}">${eur(p.final)}</div><div class="d">${corta(p.fin)}, sin restar ${plural(p.sin.length, "cargo sin importe", "cargos sin importe")}</div></div>
-      <div><div class="n">${faltaCero ? "Para no quedarte en negativo" : "Para mantener el colchón"}</div><div class="v num ${faltaCero || faltaColchon ? "mal" : "bien"}">${faltaCero ? eur(faltaCero) : (faltaColchon ? eur(faltaColchon) : "Cubierto")}</div><div class="d">${faltaCero || faltaColchon ? "Te faltan el " + corta(p.min.fecha) : "Hasta el " + corta(p.fin)}</div></div>
+      <div class="tile"><div class="n"><span class="ic">${icono("inversiones")}</span>Tu cartera</div><div class="v num">${eur(tot)}</div><div class="d">${inv.length ? plural(inv.length, "producto", "productos") : "Sin fondos ni acciones"}</div></div>
+      <div class="tile"><div class="n"><span class="ic">${icono("cuenta")}</span>Margen fijo al mes</div><div class="v num">${eur0(r2(fm.ing - fm.gas))}</div><div class="d">Antes de tarjetas y día a día</div></div>
+      ${meses.slice(-2).map(x => `<div class="tile"><div class="n"><span class="ic">${icono("pasado")}</span>Ahorro real · ${MESES[+x.k.slice(5) - 1]}${x.completo ? "" : "*"}</div><div class="v num ${x.ahorro < 0 ? "mal" : "bien"}">${eur(x.ahorro, true)}</div><div class="d">Tasa ${tasa(x)}</div></div>`).join("")}
     </div>
-    <figure class="grafico">${leyendaSaldo(true)}<div class="hueco"></div></figure>
-    <div class="bloque mt"><h3>Todos los movimientos previstos</h3>${tablaEventos(p.ev, p)}</div>
-    <details class="metodo"><summary>Cómo se calcula</summary><ul>
-      <li>Parte del saldo del último movimiento cargado (${corta(BASE)}).</li>
-      <li><b>Exacto:</b> importe fijo conocido (comunidad, garaje, CC.OO., cuotas de honorarios). <b>Último real:</b> cargos recurrentes que varían (nómina, seguros): se usa el último importe que salió en el banco. <b>Por confirmar:</b> se sabe que va a cambiar (hipoteca desde enero) y se usa el último real hasta tener el nuevo.</li>
-      <li><b>Sin importe:</b> tarjetas sin liquidación, pagos sin presupuesto e impuestos sin recibo. Se cuentan y se marcan, pero no se restan. Su <b>tope</b> es el saldo más bajo que queda desde ese día hasta el final del horizonte: si el cargo es mayor, la cuenta baja de 0.</li>
-      <li>Si un día cae en sábado o domingo, pasa al lunes. En un mismo día se restan primero los gastos y después los ingresos.</li>
-      <li>Las tarjetas, el día a día y los traspasos no se proyectan nunca.</li></ul></details>`;
-  graficoSaldo(el.querySelector(".hueco"), p, {hist: historiaSaldo(30)});
+    <div class="dos">
+      <div class="bloque"><h3>Qué hacer con lo que sobra <span class="chip">contexto/05</span></h3>${esc6.html}</div>
+      <div class="pila">
+        ${proximo("Perfil de riesgo", "Cuánta volatilidad aceptas y cuánto quieres destinar cada mes.")}
+        ${proximo("Reparto del ahorro", "Qué parte del ahorro mensual va a colchón, casa e inversión.")}
+        ${proximo("Scoring de inversión", "Una nota para cada fondo o acción según tu perfil.")}
+      </div>
+    </div>`;
+}
+
+function vistaFinanciacion(el){
+  const fm = fijosMensuales(), lim = C.reglas.tasa_esfuerzo_max_pct, hip = deudaDe("hipoteca"), piso = C.bienes.find(b => b.id === "piso");
+  const end = fm.ing ? fm.deuda / fm.ing * 100 : null, libre = r2(fm.ing * lim / 100 - fm.deuda);
+  const f = hip && hip.cuadro ? filaCuadro(hip, BASE) : null, viva = hip ? pendienteDe(hip) : 0;
+  const sig = hip && hip.cuadro ? hip.cuadro.filter(x => leer(x.fecha) > BASE).slice(0, 12) : [];
+  const intAnio = r2(sig.reduce((a, x) => a + x.intereses, 0)), capAnio = r2(sig.reduce((a, x) => a + x.amortizacion, 0));
+  const viv = C.fijos.filter(x => ["hipoteca", "comunidad"].includes(x.id) && x.importe != null).reduce((a, x) => a + x.importe, 0);
+  const ratios = [
+    {n: "Tasa de esfuerzo", v: end, lim, f: "Cuotas de deuda ÷ ingresos fijos"},
+    {n: "Vivienda sobre ingresos", v: fm.ing ? viv / fm.ing * 100 : null, lim, f: "Hipoteca + comunidad ÷ ingresos fijos"},
+    {n: "LTV del piso", v: hip && piso ? viva / piso.valor * 100 : null, lim: 80, f: "Hipoteca pendiente ÷ precio de compra"},
+  ];
+  el.innerHTML = `
+    ${enDesarrollo("Financiación · en desarrollo", "Aquí calcularemos cuándo puedes volver a financiar una casa o un piso, con un scoring como el de los bancos y tu tasa de esfuerzo. Por ahora, tus ratios reales y la hipoteca.")}
+    <div class="cifras">
+      <div class="tile ${end > lim ? "alerta" : ""}"><div class="n"><span class="ic">${icono("financiacion")}</span>Tasa de esfuerzo</div><div class="v num ${end > lim ? "mal" : ""}">${pct(end)}</div><div class="d">Límite ${lim} %</div></div>
+      <div class="tile"><div class="n"><span class="ic">${icono("cuenta")}</span>Cuota libre hasta el ${lim} %</div><div class="v num ${libre < 0 ? "mal" : ""}">${eur0(libre)}<span class="tenue" style="font-size:14px">/mes</span></div><div class="d">Con tus ingresos fijos de hoy</div></div>
+      <div class="tile"><div class="n"><span class="ic">${icono("escudo")}</span>Hipoteca pendiente</div><div class="v num">${eur0(viva)}</div><div class="d">${f ? "Tras la cuota del " + corta(leer(f.fecha)) : ""}</div></div>
+      <div class="tile"><div class="n"><span class="ic">${icono("pasado")}</span>Próximos 12 meses</div><div class="v num">${eur0(intAnio)}</div><div class="d">de intereses · ${eur0(capAnio)} de capital</div></div>
+    </div>
+    <div class="dos">
+      <div class="bloque"><h3>Hipoteca: próximas cuotas <span class="chip">TAE ${String(hip.tae_pct).replace(".", ",")} %</span></h3>
+        <div class="envuelve"><table><thead><tr><th>Fecha</th><th class="der">Cuota</th><th class="der">Capital</th><th class="der">Intereses</th><th class="der">Pendiente</th></tr></thead><tbody>
+        ${sig.map(x => `<tr><td class="num">${corta(leer(x.fecha))}/${x.fecha.slice(2, 4)}</td><td class="der num"><b>${eur(x.cuota)}</b></td><td class="der num">${eur(x.amortizacion)}</td><td class="der num tenue">${eur(x.intereses)}</td><td class="der num">${eur0(x.pendiente)}</td></tr>`).join("")}
+        </tbody></table></div><p class="nota">${esc(hip.fuente || "")}</p></div>
+      <div class="pila">
+        <div class="bloque"><h3>Tus ratios</h3>${ratios.map(medidorRatio).join("")}</div>
+        ${proximo("¿Cuándo puedo volver a financiar?", "Fecha estimada según tu ahorro, la entrada necesaria y tu tasa de esfuerzo.")}
+        ${proximo("Scoring bancario", "Cómo te vería un banco: estabilidad, endeudamiento, ahorro y colchón.")}
+      </div>
+    </div>`;
 }
 
 /* ---------- ¿Puedo comprarlo? (validador de compras) ----------
@@ -705,16 +866,16 @@ function vistaComprar(el){
   const valido = aNum(c.importe) > 0 && (c.forma !== "financiado" || (aNum(c.cuota) > 0 && aNum(c.plazo) > 0));
   const r = ESTADO.evaluada && valido ? evaluarCompra(c) : null;
   const mf = r ? mejorFecha(c) : null;
-  const seg = (k, obj, sel) => `<span class="segmentos" role="group">${Object.entries(obj).map(([v, n]) => `<button type="button" data-${k}="${v}" aria-pressed="${sel === v}">${Array.isArray(n) ? n[0] : n}</button>`).join("")}</span>`;
+  const segC = (k, obj, sel) => `<span class="segmentos" role="group">${Object.entries(obj).map(([v, n]) => `<button type="button" data-${k}="${v}" aria-pressed="${sel === v}">${Array.isArray(n) ? n[0] : n}</button>`).join("")}</span>`;
   const p3 = r && r.p3;
-  el.innerHTML = `<h2>¿Puedo comprarlo?</h2><p class="intro">Tus datos reales + tus reglas. La compra es una ${cert("hipotesis")}: no se guarda.</p>
+  el.innerHTML = `<p class="sub" style="margin:0">Tus datos reales y tus reglas. La compra es una ${cert("hipotesis")}: no cambia tus datos.</p>
     <div class="bloque">
       <div class="form-compra">
         <label class="ancho">Qué<input type="text" id="c-que" value="${esc(c.que)}" placeholder="Ruedas, reloj, viaje…"></label>
         <label>Precio (€)<input type="text" inputmode="decimal" id="c-importe" value="${esc(c.importe)}" placeholder="0,00"></label>
         <label>Cuándo<input type="date" id="c-fecha" value="${esc(c.fecha)}" min="${iso(sumar(BASE, 1))}"></label>
-        <div class="campo ancho"><span>Qué tipo de compra es <span class="tenue" style="font-weight:500">· ${TIPOS[c.tipo][1]}</span></span>${seg("tipo", TIPOS, c.tipo)}</div>
-        <div class="campo ancho"><span>Cómo la pagas</span>${seg("forma", FORMAS, c.forma)}</div>
+        <div class="campo ancho"><span>Qué tipo de compra es <span class="tenue" style="font-weight:500">· ${TIPOS[c.tipo][1]}</span></span>${segC("tipo", TIPOS, c.tipo)}</div>
+        <div class="campo ancho"><span>Cómo la pagas</span>${segC("forma", FORMAS, c.forma)}</div>
         ${c.tipo !== "consumo" ? `<label>Valor si lo vendieras (€)<input type="text" inputmode="decimal" id="c-reventa" value="${esc(c.reventa)}" placeholder="Lo que te darían"></label>` : ""}
         ${c.tipo === "renta" ? `<label>Ingreso al mes (€)<input type="text" inputmode="decimal" id="c-ingreso" value="${esc(c.ingreso)}" placeholder="0,00"></label>` : ""}
         ${c.forma === "financiado" ? `<label>Cuota / mes (€)<input type="text" inputmode="decimal" id="c-cuota" value="${esc(c.cuota)}" placeholder="0,00"></label>
@@ -749,7 +910,7 @@ function vistaComprar(el){
         : `<p class="gran mal">Ninguno</p><p class="sub">En 180 días te deja en negativo siempre.</p>`}
         <p class="nota">Sin tarjetas ni día a día.</p></div>
     </div>` : ""}
-    <div class="bloque mt"><h3>Compras miradas <span class="tenue" style="font-size:13px;font-weight:600">${NUBE ? "guardadas en tu cuenta" : "en este navegador"}</span></h3>${lista.length ? `<ul class="movs">
+    <div class="bloque"><h3>Compras miradas <span class="tenue" style="font-size:13px;font-weight:600">${NUBE ? "guardadas en tu cuenta" : "en este navegador"}</span></h3>${lista.length ? `<ul class="movs">
       ${lista.map((x, i) => `<li class="mov ${x.r1 ? "ing" : "sin"}"><span class="mi" aria-hidden="true">${x.r1 ? "✓" : "✕"}</span><span class="mc"><span class="mn">${esc(x.que || "Compra")}</span><span class="ms">${TIPOS[x.tipo || "consumo"][0]} · ${FORMAS[x.forma] || ""} · ${esc(x.r2)}</span></span><span class="mv"><b class="num">${eur(aNum(x.importe))}</b><span><button class="enlace" type="button" data-cargar="${i}">Ver</button> · <button class="enlace" type="button" data-quitar="${i}" style="color:var(--critico)">Quitar</button></span></span></li>`).join("")}
       </ul>` : `<p class="sub">Ninguna todavía.</p>`}</div>
     <details class="metodo"><summary>Cómo decide</summary><ul>
@@ -770,100 +931,6 @@ function vistaComprar(el){
     const g = e.target.closest("[data-cargar]"); if (g){ const x = leerCompras()[+g.dataset.cargar]; if (x){ const {cuando, r1, r2, ts, _id, ...resto} = x; ESTADO.compra = {...ESTADO.compra, tipo: "consumo", ...resto}; if (!ESTADO.compra.fecha || leer(ESTADO.compra.fecha) <= BASE) ESTADO.compra.fecha = iso(sumar(BASE, 1)); ESTADO.evaluada = true; pintar(); window.scrollTo(0, 0); } }
   };
   el.onkeydown = e => { if (e.key === "Enter" && e.target.matches("input")){ ESTADO.evaluada = true; pintar(); } };
-}
-
-function vistaMovimientos(el){
-  const meses = resumenMeses(), F = ESTADO.filtro;
-  const lista = MOVS.filter(m => (!F.mes || m.fecha.startsWith(F.mes)) && (!F.cat || m.cat === F.cat) && (!F.tipo || m.tipo === F.tipo) && (!F.q || m.concepto.toLowerCase().includes(F.q.toLowerCase()))).slice().reverse();
-  const tot = r2(lista.reduce((a, m) => a + m.importe, 0)), sinCat = MOVS.filter(m => m.cat === "sin_categoria").length;
-  const incompletos = meses.filter(m => !m.completo).map(m => `* ${cap(MESES_L[+m.k.slice(5) - 1])} está incompleto: datos hasta el ${corta(m.hasta)}.`).join(" ");
-  el.innerHTML = `<h2>Movimientos</h2><p class="intro">Todo lo que ha pasado por la cuenta.</p>
-    <figure class="grafico"><div class="leyenda"><span><i style="background:var(--ingreso)"></i>Ingresos corrientes</span><span><i style="background:var(--gasto)"></i>Gastos corrientes</span></div><div class="hueco"></div>
-      <p class="pie">${incompletos}</p></figure>
-    <div class="controles" style="margin-top:22px">
-      <label>Mes <select id="f-mes"><option value="">Todos</option>${meses.map(m => `<option value="${m.k}" ${F.mes === m.k ? "selected" : ""}>${cap(nombreMes(m.k))}</option>`).join("")}</select></label>
-      <label>Categoría <select id="f-cat"><option value="">Todas</option>${Object.values(CAT).filter(c => MOVS.some(m => m.cat === c.id)).map(c => `<option value="${c.id}" ${F.cat === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select></label>
-      <label>Tipo <select id="f-tipo"><option value="">Todos</option>${[["ingreso","Ingresos"],["gasto","Gastos"],["interno","Entre cuentas"],["compra_piso","Compra del piso"]].map(([k, n]) => `<option value="${k}" ${F.tipo === k ? "selected" : ""}>${n}</option>`).join("")}</select></label>
-      <label>Buscar <input type="search" id="f-q" value="${esc(F.q)}" placeholder="Concepto"></label>
-    </div>
-    <p class="sub">${plural(lista.length, "movimiento", "movimientos")} · suma ${eur(tot, true)}${sinCat ? ` · <span class="mal">${sinCat} sin categoría</span>` : ""}</p>
-    <div class="envuelve"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th class="der">Importe</th><th class="der">Saldo</th></tr></thead><tbody>
-      ${lista.map(m => `<tr><td class="fecha num">${corta(m.f)}</td><td>${esc(m.concepto)}</td><td class="${m.cat === "sin_categoria" ? "mal" : "tenue"}">${esc(CAT[m.cat].nombre)}</td><td class="der num ${m.importe > 0 ? "positivo" : ""}">${eur(m.importe, true)}</td><td class="der num">${eur(m.saldo)}</td></tr>`).join("")}
-    </tbody></table></div>`;
-  graficoMeses(el.querySelector(".hueco"), meses);
-  const set = (k, v) => { ESTADO.filtro[k] = v; pintar(); };
-  $("f-mes").onchange = e => set("mes", e.target.value); $("f-cat").onchange = e => set("cat", e.target.value); $("f-tipo").onchange = e => set("tipo", e.target.value);
-  let t; $("f-q").oninput = e => { clearTimeout(t); t = setTimeout(() => { set("q", e.target.value); const i = $("f-q"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); };
-}
-
-function vistaGastos(el){
-  const meses = resumenMeses(); if (!ESTADO.mesGastos) ESTADO.mesGastos = meses[meses.length - 1].k;
-  const m = meses.find(x => x.k === ESTADO.mesGastos) || meses[meses.length - 1];
-  const items = Object.entries(m.porCat).map(([c, v]) => ({n: CAT[c].nombre, v, c})).filter(i => i.v > 0).sort((a, b) => b.v - a.v);
-  const total = m.gastos;
-  const diaAdia = new Set((C.variables.find(v => v.id === "dia-a-dia") || {}).categorias || []);
-  const totalDia = r2(Object.entries(m.porCat).filter(([c]) => diaAdia.has(c)).reduce((a, [, v]) => a + v, 0));
-  const diasMes = m.completo ? m.finMes.getDate() : m.hasta.getDate();
-  const comercios = {};
-  for (const x of MOVS.filter(x => x.fecha.startsWith(m.k) && x.tipo === "gasto" && x.importe < 0)){ const k = x.concepto.replace(/\d{3,}/g, "").replace(/\s+/g, " ").trim(); comercios[k] = r2((comercios[k] || 0) - x.importe); }
-  const top = Object.entries(comercios).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const cats = [...new Set(meses.flatMap(x => Object.keys(x.porCat)))].sort((a, b) => (m.porCat[b] || 0) - (m.porCat[a] || 0));
-  el.innerHTML = `<h2>Gastos</h2><p class="intro">En qué se va el dinero, mes a mes.</p>
-    <div class="controles"><label>Mes <select id="g-mes">${meses.map(x => `<option value="${x.k}" ${x.k === m.k ? "selected" : ""}>${cap(nombreMes(x.k))}${x.completo ? "" : " (hasta el " + corta(x.hasta) + ")"}</option>`).join("")}</select></label></div>
-    <div class="cifras">
-      <div><div class="n">Gasto corriente</div><div class="v num">${eur(-total)}</div><div class="d">${m.completo ? "Mes completo" : "Hasta el " + corta(m.hasta)}</div></div>
-      <div><div class="n">Ingresos corrientes</div><div class="v num positivo">${eur(m.ingresos, true)}</div><div class="d">${Object.entries(m.porIng).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c]) => CAT[c].nombre).join(", ") || "—"}</div></div>
-      <div><div class="n">Resultado del mes</div><div class="v num ${m.ahorro < 0 ? "mal" : "bien"}">${eur(m.ahorro, true)}</div><div class="d">Tasa de ahorro: ${tasa(m)}</div></div>
-      <div><div class="n">Día a día</div><div class="v num">${eur(-totalDia)}</div><div class="d">${eur(r2(totalDia / diasMes))} de media por día (${diasMes} días)</div></div>
-    </div>
-    <div class="mitades">
-      <div class="bloque"><h3>Por categoría</h3><figure class="grafico limpio"><div class="hueco"></div></figure>
-        <p class="sub">Las tarjetas salen como un solo cargo el día 5.</p></div>
-      <div class="bloque"><h3>Dónde más</h3><div class="envuelve"><table><tbody>${top.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="der num">${eur(-v)}</td></tr>`).join("")}</tbody></table></div></div>
-    </div>
-    <div class="bloque mt"><h3>Mes a mes</h3><div class="envuelve"><table><thead><tr><th>Categoría</th>${meses.map(x => `<th class="der">${cap(MESES_L[+x.k.slice(5) - 1])}${x.completo ? "" : "*"}</th>`).join("")}</tr></thead><tbody>
-      ${cats.map(c => `<tr><td>${esc(CAT[c].nombre)}</td>${meses.map(x => `<td class="der num">${x.porCat[c] ? eur(-x.porCat[c]) : "—"}</td>`).join("")}</tr>`).join("")}
-      <tr class="total"><td>Total gasto corriente</td>${meses.map(x => `<td class="der num">${eur(-x.gastos)}</td>`).join("")}</tr>
-      <tr><td>Ingresos corrientes</td>${meses.map(x => `<td class="der num positivo">${eur(x.ingresos, true)}</td>`).join("")}</tr>
-      <tr><td><b>Resultado</b></td>${meses.map(x => `<td class="der num ${x.ahorro < 0 ? "mal" : "bien"}"><b>${eur(x.ahorro, true)}</b></td>`).join("")}</tr>
-      <tr><td class="tenue">Entre cuentas tuyas (neto)</td>${meses.map(x => `<td class="der num tenue">${x.interno ? eur(x.interno, true) : "—"}</td>`).join("")}</tr>
-      <tr><td class="tenue">Compra del piso (neto)</td>${meses.map(x => `<td class="der num tenue">${x.compra ? eur(x.compra, true) : "—"}</td>`).join("")}</tr>
-    </tbody></table></div><p class="sub">* Mes incompleto. Las dos últimas filas no cuentan en el resultado.</p></div>`;
-  graficoBarras(el.querySelector(".hueco"), items, total, "Gasto por categoría en " + nombreMes(m.k));
-  $("g-mes").onchange = e => { ESTADO.mesGastos = e.target.value; pintar(); };
-}
-
-function vistaRecurrentes(el){
-  const p = prevision(400), fm = fijosMensuales();
-  const prox = nombre => { const e = p.ev.find(e => e.concepto === nombre); return e ? corta(e.fecha) : "—"; };
-  const filas = C.fijos.map(f => ({f, anual: f.importe == null || f.activo === false ? null : r2(f.importe * (f.meses ? f.meses.length : 12))}));
-  const anualGastos = r2(filas.filter(x => x.f.tipo === "gasto" && x.anual != null).reduce((a, x) => a + x.anual, 0));
-  const anualIngresos = r2(filas.filter(x => x.f.tipo === "ingreso" && x.anual != null).reduce((a, x) => a + x.anual, 0));
-  const susc = {};
-  for (const m of MOVS.filter(m => m.cat === "suscripciones")){ const k = m.concepto.replace(/^tj-/i, ""); (susc[k] ||= []).push(m); }
-  const tarj = {}, reT = new RegExp(C.tarjetas.patron, "i");
-  for (const m of MOVS.filter(m => reT.test(m.concepto))) tarj[m.fecha.slice(0, 7)] = r2((tarj[m.fecha.slice(0, 7)] || 0) - m.importe);
-  const mesesT = Object.keys(tarj).sort();
-  const liq = (C.tarjetas.liquidaciones || []).find(l => leer(l.cargo) > BASE);
-  el.innerHTML = `<h2>Recurrentes</h2><p class="intro">Lo que se repite y lo que cuesta al año.</p>
-    <div class="cifras">
-      <div><div class="n">Ingresos fijos al año</div><div class="v num positivo">${eur(anualIngresos, true)}</div><div class="d">${eur(fm.ing)} al mes</div></div>
-      <div><div class="n">Gastos fijos al año</div><div class="v num">${eur(-anualGastos)}</div><div class="d">Sin tarjetas ni día a día</div></div>
-      <div><div class="n">Tarjetas: cargos ya pasados</div><div class="v num">${mesesT.length ? eur(-tarj[mesesT[mesesT.length - 1]]) : "—"}</div><div class="d">${mesesT.map(k => cap(MESES_L[+k.slice(5) - 1]) + ": " + eur(tarj[k])).join(" · ") || "Ninguno"}</div></div>
-      <div><div class="n">Próximo cargo de tarjetas</div><div class="v num ${liq && liq.importe != null ? "" : "mal"}">${liq && liq.importe != null ? eur(-liq.importe) : "¿?"}</div><div class="d">${prox(C.tarjetas.nombre)}: ${liq && liq.importe != null ? "liquidación " + esc(liq.fuente) : "falta la liquidación"}</div></div>
-    </div>
-    <div class="bloque"><h3>Fijos</h3><div class="envuelve"><table><thead><tr><th>Concepto</th><th>Cuándo</th><th class="der">Importe</th><th>Certeza</th><th>Próximo</th><th class="der">Al año</th></tr></thead><tbody>
-      ${filas.map(({f, anual}) => `<tr class="${f.activo !== false && f.importe == null ? "sin" : ""}"><td><b>${esc(f.nombre)}</b>${f.nota || f.revision ? `<span class="etq">${esc(f.revision ? f.revision.nota : f.nota)}</span>` : ""}</td>
-        <td>${f.meses ? "Día " + f.dia + " de " + f.meses.map(x => MESES[x - 1]).join(", ") : "Día " + f.dia + " de cada mes"}</td>
-        <td class="der num ${f.activo === false ? "tenue" : f.tipo === "ingreso" ? "positivo" : ""}">${f.activo === false ? "Inactivo" : f.importe == null ? "¿?" : eur(f.tipo === "ingreso" ? f.importe : -f.importe, true)}</td>
-        <td>${f.activo === false ? "—" : cert(f.certeza)}</td><td class="num">${f.activo === false ? "—" : prox(f.nombre)}</td><td class="der num">${anual == null ? "—" : eur(f.tipo === "ingreso" ? anual : -anual, true)}</td></tr>`).join("")}
-      <tr class="sin"><td><b>${esc(C.tarjetas.nombre)}</b><span class="etq">${esc(C.tarjetas.nota)}</span></td><td>Día ${C.tarjetas.dia_cargo} de cada mes</td><td class="der mal">¿?</td><td>${cert("sin_importe")}</td><td class="num">${prox(C.tarjetas.nombre)}</td><td class="der">—</td></tr>
-    </tbody></table></div></div>
-    <div class="mitades">
-      <div class="bloque"><h3>Suscripciones vistas en la cuenta</h3>${Object.keys(susc).length ? `<ul class="lista">${Object.entries(susc).map(([k, l]) => `<li><span class="nom">${esc(k)}</span><span class="val num">${eur(l[l.length - 1].importe)}</span><span class="det">${plural(l.length, "cargo visto", "cargos vistos")}, el último el ${corta(l[l.length - 1].f)}. ${l.length < 2 ? "Con un solo cargo no se puede saber si es mensual: no se suma a los fijos." : ""}</span></li>`).join("")}</ul>` : `<p class="sub">Ninguna.</p>`}</div>
-      <div class="bloque"><h3>Trimestrales, anuales y renovaciones</h3><ul class="lista">${C.fijos.filter(f => f.meses).map(f => `<li><span class="nom">${esc(f.nombre)}</span><span class="val num">${eur(-f.importe)}</span><span class="det">${f.meses.map(x => MESES_L[x - 1]).join(", ")}. Próximo: ${prox(f.nombre)}</span></li>`).join("")}
-        ${C.vencimientos.filter(v => v.tipo === "seguro" || v.tipo === "impuesto").map(v => `<li><span class="nom">${esc(v.nombre)}</span><span class="val ${v.fecha ? "" : "mal"}">${v.fecha ? corta(leer(v.fecha)) : "Falta fecha"}</span><span class="det">${esc(v.nota || "")}</span></li>`).join("")}</ul></div>
-    </div>`;
 }
 
 // Escalera del excedente (contexto/05, «Orden de uso del excedente mensual»). Solo usa datos reales o de config.
@@ -897,103 +964,86 @@ function medidorRatio(r){
     <div class="f">${esc(r.f)}${r.lim != null ? ` · Límite ${r.lim} %${malo ? " · <b class='mal'>por encima</b>" : cerca ? " · cerca del límite" : ""}` : " · Informativo"}</div></div>`;
 }
 
-function vistaGlobal(el){
-  const liq = ULT.saldo, bienes = C.bienes, deudas = C.deudas;
-  const compromisos = C.pendientes.filter(p => p.importe != null && p.clase !== "cobro");
-  const activos = r2(liq + bienes.filter(b => b.valor != null).reduce((a, b) => a + b.valor, 0));
-  const pasivos = r2(deudas.reduce((a, d) => a + d.pendiente, 0) + compromisos.reduce((a, p) => a + p.importe, 0));
-  const neto = r2(activos - pasivos), sinValor = bienes.filter(b => b.valor == null);
-  const fm = fijosMensuales(), p = prevision(ESTADO.horizonte), base = C.reglas.gastos_fijos_mensuales_colchon;
-  const meses = resumenMeses(), colMeses = Math.max(0, p.min.saldo) / base, objetivo = C.reglas.colchon_meses_estable || 3;
-  const hip = deudas.find(d => d.id === "hipoteca"), piso = bienes.find(b => b.id === "piso");
-  const viv = C.fijos.filter(f => ["hipoteca", "comunidad"].includes(f.id) && f.importe != null).reduce((a, f) => a + f.importe, 0);
-  const ratios = [
-    {n: "Servicio de la deuda", v: fm.ing ? fm.deuda / fm.ing * 100 : null, lim: C.reglas.tasa_esfuerzo_max_pct, f: `Cuotas ÷ ingresos fijos`},
-    {n: "Gastos fijos sobre ingresos", v: fm.ing ? fm.gas / fm.ing * 100 : null, lim: null, f: `Gastos fijos ÷ ingresos fijos`},
-    {n: "Vivienda sobre ingresos", v: fm.ing ? viv / fm.ing * 100 : null, lim: C.reglas.tasa_esfuerzo_max_pct, f: `Hipoteca + comunidad ÷ ingresos fijos`},
-    {n: "LTV del piso", v: hip && piso ? hip.pendiente / piso.valor * 100 : null, lim: 80, f: "Hipoteca pendiente ÷ precio de compra"},
-  ];
-  const esc6 = escaleraExcedente(p);
-  el.innerHTML = `<h2>Global</h2><p class="intro">Patrimonio, salud financiera y qué hacer con lo que sobre.</p>
-    <div class="veredicto ${neto < 0 ? "malo" : "bueno"}"><h2>Patrimonio neto: <span class="cifra">${eur(neto)}</span></h2>
-      <p>Piso a precio de compra.${sinValor.length ? ` Faltan ${plural(sinValor.length, "dato", "datos")}.` : ""}</p></div>
-    <figure class="grafico mt"><div class="tit">Lo que tienes frente a lo que debes</div><div class="hueco"></div></figure>
-    <div class="mitades">
-      <div class="bloque"><h3>Lo que tienes <span class="num">${eur(activos)}</span></h3><ul class="lista">
-        <li><span class="nom">Cuenta Caja Rural</span><span class="val num">${eur(liq)}</span><span class="det">Real, a ${corta(BASE)}</span></li>
-        ${bienes.map(b => `<li><span class="nom">${esc(b.nombre)}</span><span class="val num ${b.valor == null ? "mal" : ""}">${b.valor == null ? "Falta dato" : eur(b.valor)}</span><span class="det">${esc(b.nota || "")}${b.liquido === false ? ". No es líquido." : ""}</span></li>`).join("")}</ul></div>
-      <div class="bloque"><h3>Lo que debes <span class="num">${eur(-pasivos)}</span></h3><ul class="lista">
-        ${deudas.map(d => `<li><span class="nom">${esc(d.nombre)}</span><span class="val num">${eur(-d.pendiente)}</span><span class="det">${esc(d.nota || "")}${d.a_fecha ? ". A " + corta(leer(d.a_fecha)) + "." : ""}</span></li>`).join("")}
-        ${compromisos.map(c => `<li><span class="nom">${esc(c.nombre)}</span><span class="val num">${eur(-c.importe)}</span><span class="det">Comprometido, pendiente de cargo</span></li>`).join("")}</ul></div>
-    </div>
-    <div class="mitades">
-      <div class="bloque"><h3>Qué hacer con lo que sobre <span class="tenue" style="font-size:13px;font-weight:600">orden de contexto/05</span></h3>${esc6.html}</div>
-      <div>
-        <div class="bloque"><h3>Colchón</h3>
-          <p style="font-size:26px;font-weight:800" class="${colMeses < objetivo ? "mal" : "bien"} num">${colMeses.toFixed(1).replace(".", ",")} <span style="font-size:16px;font-weight:600" class="tenue">de ${objetivo} meses</span></p>
-          <div class="medidor ${colMeses >= objetivo ? "ok" : colMeses >= objetivo / 2 ? "medio" : ""}" role="img" aria-label="${colMeses.toFixed(1)} de ${objetivo} meses"><i style="width:${Math.min(100, colMeses / objetivo * 100)}%"></i></div>
-          <p class="sub">Día más justo ÷ ${eur(base)} de fijos al mes.</p></div>
-        <div class="bloque"><h3>Ratios</h3>${ratios.map(medidorRatio).join("")}</div>
-      </div>
-    </div>
-    <div class="bloque mt"><h3>Resultado real por mes</h3><div class="envuelve"><table><thead><tr><th>Mes</th><th class="der">Ingresos</th><th class="der">Gastos</th><th class="der">Resultado</th><th class="der">Tasa de ahorro</th></tr></thead><tbody>
-      ${meses.map(x => `<tr><td>${cap(nombreMes(x.k))}${x.completo ? "" : ` <span class="tenue">(hasta el ${corta(x.hasta)})</span>`}</td><td class="der num positivo">${eur(x.ingresos, true)}</td><td class="der num">${eur(-x.gastos)}</td><td class="der num ${x.ahorro < 0 ? "mal" : "bien"}"><b>${eur(x.ahorro, true)}</b></td><td class="der num ${x.completo && x.ahorro < 0 ? "mal" : "tenue"}">${tasa(x)}</td></tr>`).join("")}
-    </tbody></table></div><p class="sub">Sin la compra del piso ni los movimientos entre cuentas tuyas.</p></div>`;
-  graficoBarras(el.querySelector(".hueco"), [{n: "Lo que tienes", v: activos, color: "var(--ingreso)"}, {n: "Lo que debes", v: pasivos, color: "var(--gasto)"}], 0, "Lo que tienes frente a lo que debes");
-}
-
-function vistaFaltan(el){
-  const items = datosQueFaltan(), grupos = [...new Set(items.map(i => i.grupo))];
-  el.innerHTML = `<h2>Datos que faltan</h2><p class="intro">La app no inventa nada: díselo al agente y lo añade.</p>
-    <div class="mitades" style="margin-top:0">${grupos.map(g => `<div class="bloque"><h3>${esc(g)} <span class="chip">${items.filter(i => i.grupo === g).length}</span></h3><ol class="faltan">${items.filter(i => i.grupo === g).map(i => `<li><span class="t">${esc(i.t)}</span>${i.q ? `<span class="q">${esc(i.q)}</span>` : ""}${i.i ? `<span class="i">${esc(i.i)}</span>` : ""}</li>`).join("")}</ol></div>`).join("")}</div>`;
-}
-
-const VISTAS = {inicio: vistaInicio, calendario: vistaCalendario, prevision: vistaPrevision, comprar: vistaComprar, movimientos: vistaMovimientos, gastos: vistaGastos, recurrentes: vistaRecurrentes, global: vistaGlobal, faltan: vistaFaltan};
+/* =========================================================
+   MARCO Y ARRANQUE
+   ========================================================= */
+const PRINCIPALES = [["inicio", "Inicio", "Posición global"], ["pasado", "Pasado", "Gastos y movimientos"], ["futuro", "Futuro", "Previsión y calendario"]];
+const HERRAMIENTAS = [["comprar", "¿Puedo comprarlo?", "Evalúa una compra", false], ["inversiones", "Inversiones", "Cartera y reparto del ahorro", true], ["financiacion", "Financiación", "Tasa de esfuerzo y vivienda", true]];
+const TITULOS = Object.fromEntries([...PRINCIPALES, ...HERRAMIENTAS].map(([k, n]) => [k, n]));
+const VISTAS = {inicio: vistaInicio, pasado: vistaPasado, futuro: vistaFuturo, comprar: vistaComprar, inversiones: vistaInversiones, financiacion: vistaFinanciacion};
+// Direcciones de la v2, por si hay enlaces guardados
+const ANTIGUAS = {calendario: "futuro", prevision: "futuro", recurrentes: "futuro", movimientos: "pasado", gastos: "pasado", global: "inicio", faltan: "inicio"};
 let ACTUAL = "inicio";
+
+function abrirHoja(titulo, html){
+  $("hoja-cont").innerHTML = `<div class="hoja-cab"><h2>${titulo}</h2><button type="button" data-cerrar aria-label="Cerrar">${icono("cerrar")}</button></div>${html}`;
+  $("hoja").hidden = false; $("hoja-cont").querySelector("[data-cerrar]").focus();
+}
+const cerrarHoja = () => { $("hoja").hidden = true; };
+function hojaLiquidez(){
+  const L = posicionLiquida();
+  abrirHoja("Posición líquida", `<p class="gran num">${eur(L.total)}</p><p class="sub">Todo lo que puedes usar sin vender el piso.</p>
+    <ul class="movs">${L.partes.map(x => `<li class="mov ing"><span class="mi">${icono(x.ic)}</span><span class="mc"><span class="mn">${esc(x.n)}</span><span class="ms">${esc(x.d)}</span></span><span class="mv"><b class="num">${x.v == null ? "¿?" : eur(x.v)}</b></span></li>`).join("")}
+    ${L.comprometido ? `<li class="mov ven"><span class="mi">!</span><span class="mc"><span class="mn">Comprometido</span><span class="ms">Honorarios pendientes de cargo</span></span><span class="mv"><b class="num">${eur(-L.comprometido)}</b></span></li>` : ""}</ul>
+    ${L.comprometido ? `<ul class="lista" style="margin-top:6px;border-top:2px solid var(--tinta)"><li><span class="nom">Libre de compromisos</span><span class="val num ${L.libre < 0 ? "mal" : ""}">${eur(L.libre)}</span></li></ul>` : ""}`);
+}
+function hojaPendientes(){
+  const items = datosQueFaltan();
+  abrirHoja("Datos pendientes", items.length ? `<p class="sub">Cuando lo sepas, díselo al agente y desaparece de aquí.</p><ul class="lista">${items.map(i => `<li><span class="nom">${esc(i.t)}</span><span></span>${i.q ? `<span class="det">${esc(i.q)}</span>` : ""}${i.i ? `<span class="det tenue">${esc(i.i)}</span>` : ""}</li>`).join("")}</ul>`
+    : `<p class="sub">No falta nada. Las tarjetas y las ruedas se esperan al extracto.</p>`);
+}
+function hojaHerramientas(){
+  abrirHoja("Herramientas", `<div class="herr">${HERRAMIENTAS.map(([k, n, d, dev]) => `<button type="button" data-tab="${k}" aria-current="${k === ACTUAL ? "page" : "false"}"><span class="ic">${icono(k === "comprar" ? "comprar" : k)}</span><span>${n}<small>${d}</small></span>${dev ? `<span class="chip oro dev">En desarrollo</span>` : ""}</button>`).join("")}</div>`);
+}
 
 function pintar(){
   const dias = entre(BASE, HOY), fr = $("frescura");
-  fr.textContent = "Datos hasta el " + corta(BASE) + (dias > 0 ? ", hace " + plural(dias, "día", "días") : "") + ". Generado el " + D.generado.slice(8, 10) + "/" + D.generado.slice(5, 7) + ".";
+  fr.textContent = "Datos al " + corta(BASE) + (dias > 0 ? " · hace " + plural(dias, "día", "días") : "");
   fr.classList.toggle("vieja", dias > 7);
-  const nFaltan = datosQueFaltan().length;
-  $("nav").innerHTML = PESTANAS.map(([k, n]) => `<button role="tab" type="button" data-tab="${k}" aria-selected="${k === ACTUAL}"${k === ACTUAL ? "" : ' tabindex="-1"'}>${icono(k)}${n}${k === "faltan" && nFaltan ? `<span class="cuenta" aria-label="${nFaltan} pendientes">${nFaltan}</span>` : ""}</button>`).join("");
-  // Móvil: barra de pestañas abajo con las cuatro principales y «Más» para el resto
-  const MOVIL = [["inicio", "Inicio"], ["prevision", "Previsión"], ["comprar", "Comprar"], ["gastos", "Gastos"]];
-  const enMas = !MOVIL.some(([k]) => k === ACTUAL);
-  $("barra").innerHTML = MOVIL.map(([k, n]) => `<button type="button" data-tab="${k}" aria-current="${k === ACTUAL ? "page" : "false"}">${icono(k)}<span>${n}</span></button>`).join("")
-    + `<button type="button" data-mas aria-current="${enMas ? "page" : "false"}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg><span>Más</span>${nFaltan ? `<i class="punto-rojo"></i>` : ""}</button>`;
-  $("hoja-lista").innerHTML = PESTANAS.filter(([k]) => !MOVIL.some(([m]) => m === k)).map(([k, n]) => `<button type="button" data-tab="${k}" aria-current="${k === ACTUAL ? "page" : "false"}">${icono(k)}<span>${n}</span>${k === "faltan" && nFaltan ? `<span class="cuenta">${nFaltan}</span>` : ""}</button>`).join("");
-  $("hoja").hidden = true;
-  $("app").innerHTML = `<section class="vista" id="v-${ACTUAL}" role="tabpanel"></section>`;
+  const nP = datosQueFaltan().length;
+  $("pend").innerHTML = `<span class="ic">${icono("info")}</span>${nP ? `<i>${nP}</i>` : ""}`;
+  $("pend").setAttribute("aria-label", nP ? `${nP} datos pendientes` : "Datos pendientes");
+  $("titulo").textContent = $("titulo-pc").textContent = TITULOS[ACTUAL];
+  document.title = TITULOS[ACTUAL] + " · Finanzas de Alberto";
+  const btn = ([k, n, , dev]) => `<button type="button" data-tab="${k}" aria-current="${k === ACTUAL ? "page" : "false"}"><span class="ic">${icono(k)}</span>${n}${dev ? `<span class="dev">Pronto</span>` : ""}</button>`;
+  $("menu").innerHTML = `<span class="grupo">Principal</span>${PRINCIPALES.map(btn).join("")}<span class="grupo">Herramientas</span>${HERRAMIENTAS.map(btn).join("")}`;
+  const L = posicionLiquida();
+  $("liq-lat").innerHTML = `<div class="n"><span class="ic">${icono("liquidez")}</span>Posición líquida</div><div class="v num">${eur(L.total)}</div>
+    <ul>${L.partes.map(x => `<li><span>${esc(x.n)}</span><b class="num">${x.v == null ? "¿?" : eur(x.v)}</b></li>`).join("")}</ul>
+    ${L.comprometido ? `<div class="libre"><span>Libre de compromisos</span><b class="num">${eur(L.libre)}</b></div>` : ""}`;
+  $("liq-movil").innerHTML = `<span class="ic">${icono("liquidez")}</span><span class="t"><small>Posición líquida</small><b class="num">${eur(L.total)}</b></span>${L.comprometido ? `<span class="x">Libre de compromisos<b class="num">${eur0(L.libre)}</b></span>` : ""}`;
+  const enHerr = HERRAMIENTAS.some(([k]) => k === ACTUAL);
+  $("barra").innerHTML = PRINCIPALES.map(([k, n]) => `<button type="button" data-tab="${k}" aria-current="${k === ACTUAL ? "page" : "false"}"><span class="ic">${icono(k)}</span><span>${n}</span></button>`).join("")
+    + `<button type="button" data-herr aria-current="${enHerr ? "page" : "false"}"><span class="ic">${icono("herramientas")}</span><span>Herramientas</span></button>`;
+  $("app").innerHTML = `<section class="vista" id="v-${ACTUAL}"></section>`;
   VISTAS[ACTUAL]($("v-" + ACTUAL));
 }
 
-/* =========================================================
-   ARRANQUE
-   ========================================================= */
 if (!D || !MOVS.length || !C){
   $("app").innerHTML = `<p class="vacio">No encuentro los datos. Esta página necesita <b>datos.js</b> en la misma carpeta. Pídele al agente: «genera datos.js con generar_datos.py».</p>`;
 } else {
-  const deHash = () => { const h = location.hash.slice(1); if (VISTAS[h]) ACTUAL = h; };
-  deHash();
-  window.addEventListener("hashchange", () => { deHash(); pintar(); window.scrollTo(0, 0); });
+  const deHash = () => { let h = location.hash.slice(1); h = ANTIGUAS[h] || h; if (VISTAS[h]) ACTUAL = h; return location.hash.slice(1) === "faltan"; };
+  const pedirFaltan = deHash();
+  window.addEventListener("hashchange", () => { deHash(); cerrarHoja(); pintar(); window.scrollTo(0, 0); });
   document.addEventListener("click", e => {
-    if (e.target.closest("[data-mas]")){ $("hoja").hidden = !$("hoja").hidden; return; }
-    if (e.target.id === "hoja"){ $("hoja").hidden = true; return; }
-    const t = e.target.closest("[data-tab],[data-ir]"); if (t){ $("hoja").hidden = true; location.hash = t.dataset.tab || t.dataset.ir; return; }
+    if (e.target.closest("[data-cerrar]") || e.target.id === "hoja"){ cerrarHoja(); return; }
+    if (e.target.closest("[data-liq]")){ hojaLiquidez(); return; }
+    if (e.target.closest("[data-pend]")){ hojaPendientes(); return; }
+    if (e.target.closest("[data-herr]")){ hojaHerramientas(); return; }
+    const t = e.target.closest("[data-tab],[data-ir]"); if (t){ cerrarHoja(); const k = t.dataset.tab || t.dataset.ir; if (k === ACTUAL){ pintar(); window.scrollTo(0, 0); } else location.hash = k; return; }
     const h = e.target.closest("[data-horizonte]"); if (h){ ESTADO.horizonte = +h.dataset.horizonte; guardar(); pintar(); return; }
+    const mo = e.target.closest("[data-modo]"); if (mo){ ESTADO.futuro = mo.dataset.modo; guardar(); pintar(); return; }
+    if (e.target.closest("[data-vertodos]")){ ESTADO.verTodos = true; pintar(); return; }
+    const mp = e.target.closest("[data-mespas]"); if (mp){ ESTADO.mesPasado = mp.dataset.mespas; ESTADO.filtro.cat = ""; ESTADO.verTodos = false; pintar(); return; }
     const c = e.target.closest("[data-cal]"); if (c){
       if (c.dataset.cal === "hoy") ESTADO.mesCal = ym(HOY);
       else { const [y, m] = ESTADO.mesCal.split("-").map(Number); ESTADO.mesCal = ym(new Date(y, m - 1 + Number(c.dataset.cal), 1)); }
       pintar(); return; }
     const d = e.target.closest("[data-dia]"); if (d){ ESTADO.diaSel = d.dataset.dia; pintar(); document.querySelector(`[data-dia="${d.dataset.dia}"]`)?.focus(); }
   });
-  $("nav").addEventListener("keydown", e => {
-    if (!["ArrowRight", "ArrowLeft"].includes(e.key)) return;
-    const i = PESTANAS.findIndex(([k]) => k === ACTUAL), n = PESTANAS[(i + (e.key === "ArrowRight" ? 1 : -1) + PESTANAS.length) % PESTANAS.length][0];
-    location.hash = n; setTimeout(() => document.querySelector(`[data-tab="${n}"]`)?.focus(), 0);
-  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("hoja").hidden) cerrarHoja(); });
   let t, ancho = window.innerWidth;
   window.addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => { if (window.innerWidth !== ancho){ ancho = window.innerWidth; pintar(); } }, 150); });
   pintar();
+  if (pedirFaltan) hojaPendientes();
 }
