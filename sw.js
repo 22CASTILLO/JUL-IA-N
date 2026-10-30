@@ -1,6 +1,6 @@
 // Sin conexión: guarda la app y los últimos datos. Con conexión, siempre pide la versión nueva primero.
-const V = "finanzas-bbe5157a96";
-const BASE = ["./", "index.html", "app.js?v=bbe5157a96", "manifest.webmanifest", "icono-180.png", "icono-192.png", "icono-512.png", "llave.json", "datos.enc.json"];
+const V = "finanzas-c9a8a4891c";
+const BASE = ["./", "index.html", "app.js?v=c9a8a4891c", "manifest.webmanifest", "icono-180.png", "icono-192.png", "icono-512.png", "llave.json", "datos.enc.json"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(BASE)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", e => {
