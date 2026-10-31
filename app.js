@@ -984,7 +984,7 @@ function hojaLiquidez(){
   const L = posicionLiquida();
   abrirHoja("Posición líquida", `<p class="gran num">${eur(L.total)}</p><p class="sub">Todo lo que puedes usar sin vender el piso.</p>
     <ul class="movs">${L.partes.map(x => `<li class="mov ing"><span class="mi">${icono(x.ic)}</span><span class="mc"><span class="mn">${esc(x.n)}</span><span class="ms">${esc(x.d)}</span></span><span class="mv"><b class="num">${x.v == null ? "¿?" : eur(x.v)}</b></span></li>`).join("")}
-    ${L.comprometido ? `<li class="mov ven"><span class="mi">!</span><span class="mc"><span class="mn">Comprometido</span><span class="ms">Honorarios pendientes de cargo</span></span><span class="mv"><b class="num">${eur(-L.comprometido)}</b></span></li>` : ""}</ul>
+    ${L.comprometido ? `<li class="mov ven"><span class="mi">!</span><span class="mc"><span class="mn">Comprometido</span><span class="ms">Pagos pendientes de cargo</span></span><span class="mv"><b class="num">${eur(-L.comprometido)}</b></span></li>` : ""}</ul>
     ${L.comprometido ? `<ul class="lista" style="margin-top:6px;border-top:2px solid var(--tinta)"><li><span class="nom">Libre de compromisos</span><span class="val num ${L.libre < 0 ? "mal" : ""}">${eur(L.libre)}</span></li></ul>` : ""}`);
 }
 function hojaPendientes(){
