@@ -120,12 +120,19 @@ function ocurrencias(dia, meses, desde, hasta){
 
 // --- La previsión: solo resta lo que tiene importe real; lo demás se cuenta como «sin importe»
 // extra: movimientos hipotéticos (validador de compras). Nunca vienen de datos/.
+function yaEnExtracto(f, d){
+  if (!f.patron) return false;
+  const re = new RegExp(f.patron, "i"), mes = ym(d), signo = f.tipo === "ingreso" ? 1 : -1;
+  return MOVS.some(m => ym(m.f) === mes && Math.sign(m.importe) === signo && re.test(m.concepto));
+}
 function prevision(dias, extra){
   const fin = sumar(BASE, dias), ev = [];
   for (const x of extra || []) if (x.fecha > BASE && x.fecha <= fin) ev.push({...x, certeza: "hipotesis", origen: "hipotesis"});
   for (const f of C.fijos){
     if (f.activo === false) continue;
     for (const d of ocurrencias(f.dia, f.meses, BASE, fin)){
+      // Si ese mes ya está cobrado o cargado en el extracto (p. ej. el día 1 cae en domingo y entra antes), no se vuelve a contar
+      if (yaEnExtracto(f, d)) continue;
       const imp = cuotaEn(f, d), nota = f.nota || "";
       if (imp == null) ev.push({fecha: d, concepto: f.nombre, importe: null, certeza: "sin_importe", clase: f.tipo, nota, origen: "fijo"});
       else ev.push({fecha: d, concepto: f.nombre, importe: f.tipo === "ingreso" ? imp : -imp, certeza: f.certeza, clase: f.tipo, nota, origen: "fijo", id: f.id});
@@ -664,7 +671,7 @@ function vistaFuturo(el){
   let lista = "", mesAnt = "";
   for (const e of p.ev){ const k = ym(e.fecha); if (k !== mesAnt){ lista += `<li class="mes-sep">${nombreMes(k)}</li>`; mesAnt = k; } lista += filaMov(e, true); }
   const fijos = C.fijos.filter(f => f.activo !== false), sigEv = id => largo.ev.find(e => e.id === id);
-  const anual = f => f.importe == null ? null : r2(Math.abs(largo.ev.filter(e => e.id === f.id && e.fecha <= sumar(BASE, 365)).reduce((a, e) => a + (e.importe || 0), 0)));
+  const anual = f => f.importe == null ? null : f.cuadro ? r2(Math.abs(largo.ev.filter(e => e.id === f.id && e.fecha < sumar(BASE, 365)).reduce((a, e) => a + (e.importe || 0), 0))) : r2(f.importe * (f.meses ? f.meses.length : 12));
   el.innerHTML = `
     <div class="heroe ${v.clase}"><div class="fila-h">
       <div><span class="estado"><i></i>${v.t}</span>
