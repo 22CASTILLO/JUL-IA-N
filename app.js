@@ -150,7 +150,7 @@ function prevision(dias, extra){
     if (d <= BASE){ d = sumar(BASE, 1); nota = nota || "Vencido y sin cargar: se reserva desde el primer día"; }
     if (d > fin) continue;
     const imp = p.importe == null ? null : (p.clase === "cobro" ? p.importe : -p.importe);
-    ev.push({fecha: d, concepto: p.nombre, importe: imp, certeza: imp == null ? "sin_importe" : (p.certeza || "exacto"), clase: p.clase === "cobro" ? "ingreso" : "gasto", nota, origen: "pendiente"});
+    ev.push({fecha: d, concepto: p.nombre, importe: imp, certeza: imp == null ? "sin_importe" : (p.certeza || "exacto"), clase: p.clase === "cobro" ? "ingreso" : "gasto", nota, origen: "pendiente", id: p.id});
   }
   for (const v of C.vencimientos){
     if (!v.fecha) continue;
@@ -486,10 +486,40 @@ function filaMov(e, conSaldo){
 }
 const listaAlertas = l => `<ul class="alertas">${l.map(a => `<li class="${a.nivel}"><span class="ico" aria-hidden="true">${a.nivel === "info" ? "i" : "!"}</span><span>${esc(a.texto)}</span></li>`).join("")}</ul>`;
 
+// Cargos que no se pueden cubrir: el primero, cuánto falta, para qué día y qué pasa si se devuelve
+const anteriorLaborable = d => { const r = sumar(d, -1); while (r.getDay() === 0 || r.getDay() === 6) r.setDate(r.getDate() - 1); return r; };
+function siDevuelve(e){
+  const x = e.origen === "tarjeta" ? C.tarjetas : e.origen === "pendiente" ? C.pendientes.find(q => q.id === e.id) : C.fijos.find(f => f.id === e.id);
+  return (x && x.si_no_hay_saldo) || C.reglas.si_no_hay_saldo_general || {gravedad: "media", texto: "Recibo domiciliado: si no hay saldo, se devuelve."};
+}
+function sinCubrir(p){
+  const malos = p.ev.filter(e => e.importe != null && e.importe < 0 && e.saldo < 0);
+  if (!malos.length) return null;
+  const primero = malos[0], idx = p.ev.indexOf(primero);
+  // Tramo en negativo: desde el primer cargo sin saldo hasta que un ingreso lo devuelve a positivo
+  let peor = 0, vuelve = null;
+  for (const e of p.ev.slice(idx)){ if (e.importe == null) continue; if (e.saldo < peor) peor = e.saldo; if (e.saldo >= 0 && e.importe > 0){ vuelve = e; break; } }
+  const tramo = malos.filter(e => !vuelve || e.fecha < vuelve.fecha);
+  const mismoDia = p.ev.filter(e => e.importe != null && e.importe < 0 && iso(e.fecha) === iso(primero.fecha));
+  return {primero, falta: r2(-peor), faltaPrimerDia: r2(-Math.min(...mismoDia.map(e => e.saldo))), limite: anteriorLaborable(primero.fecha), cargos: tramo.map(e => ({...e, si: siDevuelve(e)})), mismoDia, vuelve};
+}
+const GRAV = {alta: ["rojo", "Grave"], media: ["oro", "Media"], baja: ["", "Leve"]};
+function bloqueSinCubrir(p){
+  const s = sinCubrir(p); if (!s) return "";
+  const varios = s.mismoDia.length > 1;
+  return `<section class="bloque sincubrir" aria-labelledby="t-sc">
+    <h3 id="t-sc">Para no quedarte en negativo</h3>
+    <p class="sc-cifra">Ten <b class="num">${eur(s.falta)}</b> más en la cuenta antes del <b>${larga(s.limite)}</b></p>
+    <p class="sub">Primer cargo sin saldo: <b>${esc(s.primero.concepto)}</b>, el ${corta(s.primero.fecha)}${varios ? `. Ese día hay ${s.mismoDia.length} cargos y no se sabe cuál pasa antes: cuenta con tenerlos todos (${eur(s.faltaPrimerDia)})` : ""}.${s.vuelve ? ` Vuelves a positivo el ${corta(s.vuelve.fecha)} con la entrada «${esc(s.vuelve.concepto)}».` : ""}</p>
+    <ul class="sc-lista">${s.cargos.map(e => { const g = GRAV[e.si.gravedad] || GRAV.media; return `<li><div class="sc-cab"><span class="fd"><b>${e.fecha.getDate()}</b>${MESES[e.fecha.getMonth()]}</span><span class="mn">${esc(e.concepto)}</span><b class="num">${eur(e.importe, true)}</b></div>
+      <div class="sc-det"><span class="chip ${g[0]}">${g[1]}</span><span>Faltan <b class="num">${eur(-e.saldo)}</b> · ${esc(e.si.texto)}</span></div></li>`; }).join("")}</ul>
+    <p class="nota">Sin contar el día a día ni cargos sin importe. Si traes el dinero de otro banco, una transferencia normal tarda un día hábil. Lo que pasa si se devuelve es la regla general: confírmalo con la entidad.</p>
+  </section>`;
+}
 // Alertas, de más a menos grave. Las tarjetas salen siempre en rojo pero no se restan.
 function avisos(p){
   const l = [], colchon = COLCHON_BASE();
-  if (p.min.saldo < 0) l.push({nivel: "grave", texto: `Negativo el ${corta(p.min.fecha)}: ${eur(p.min.saldo)}`});
+  if (p.min.saldo < 0){ const s = sinCubrir(p); l.push({nivel: "grave", texto: s ? `Faltan ${eur(s.falta)} antes del ${larga(s.limite)}: no cubres ${s.primero.concepto} (${corta(s.primero.fecha)})` : `Negativo el ${corta(p.min.fecha)}: ${eur(p.min.saldo)}`}); }
   else if (p.min.saldo < colchon) l.push({nivel: "grave", texto: `Sin colchón el ${corta(p.min.fecha)}: faltan ${eur(r2(colchon - p.min.saldo))}`});
   const tj = p.sin.find(e => e.origen === "tarjeta");
   if (tj) l.push({nivel: "grave", texto: `Tarjetas del ${corta(tj.fecha)}: sin restar hasta ver la liquidación${tj.tope >= 0 ? ` (margen ${eur0(tj.tope)})` : ""}`});
@@ -679,6 +709,7 @@ function vistaFuturo(el){
         <div class="pills">${nom ? `<span class="pill">Nómina <b class="num">${eur(nom.importe, true)}</b> ${corta(nom.fecha)}</span>` : ""}<span class="pill">Saldo el ${corta(p.fin)} <b class="num">${eur0(p.final)}</b></span>${tj ? `<span class="pill rojo">Tarjetas ${corta(tj.fecha)} <b>sin restar</b></span>` : ""}</div></div>
       <div><div class="n" style="margin-bottom:8px">${v.h}. Horizonte:</div>${selectorHorizonte()}</div>
     </div></div>
+    ${bloqueSinCubrir(p)}
     <figure class="grafico"><div class="tit">Saldo previsto</div>${leyendaSaldo(false)}<div class="hueco"></div></figure>
     <div class="fila-tit"><span style="font-weight:800;font-size:18px">Lo que viene</span>${seg("modo", {lista: "Lista", calendario: "Calendario"}, ESTADO.futuro)}</div>
     ${ESTADO.futuro === "calendario" ? htmlCalendario() : `<div class="bloque"><ul class="movs">${lista || `<li class="sub">Nada previsto.</li>`}</ul>

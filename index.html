@@ -196,8 +196,8 @@ tr.total td{font-weight:800;border-top:2px solid var(--tinta);border-bottom:0}
 .mov{display:grid;grid-template-columns:42px 34px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--raya-2)}
 .mov:last-child{border-bottom:0}
 .movs .mov:not(:has(.fd)){grid-template-columns:34px minmax(0,1fr) auto}
-.mov .fd{display:flex;flex-direction:column;align-items:center;line-height:1.05;font-size:11px;color:var(--tinta-3);text-transform:uppercase;font-weight:700}
-.mov .fd b{font-size:18px;color:var(--tinta);font-weight:800}
+.mov .fd,.sc-cab .fd{display:flex;flex-direction:column;align-items:center;line-height:1.05;font-size:11px;color:var(--tinta-3);text-transform:uppercase;font-weight:700}
+.mov .fd b,.sc-cab .fd b{font-size:18px;color:var(--tinta);font-weight:800}
 .mov .mi{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:14px;background:var(--hoja-2);color:var(--tinta-2)}
 .mov .mi svg{width:17px;height:17px}
 .mov.ing .mi{background:var(--bien-suave);color:var(--bien)} .mov.sin .mi{background:var(--critico-suave);color:var(--critico)}
@@ -213,6 +213,12 @@ tr.total td{font-weight:800;border-top:2px solid var(--tinta);border-bottom:0}
 .dia-sep{display:flex;justify-content:space-between;gap:10px;font-size:12px;font-weight:700;color:var(--tinta-3);padding:12px 0 2px;text-transform:capitalize}
 
 .alertas{list-style:none;margin:0;padding:0}
+.sincubrir{border-left:4px solid var(--critico)} .sincubrir h3{margin:0 0 6px;font-size:15px;color:var(--critico)}
+.sc-cifra{margin:0 0 6px;font-size:clamp(18px,2.6vw,22px);font-weight:700;text-wrap:balance} .sc-cifra b.num{color:var(--critico)}
+.sc-lista{list-style:none;margin:12px 0 0;padding:0}
+.sc-lista li{padding:10px 0;border-top:1px solid var(--raya-2);display:grid;gap:6px}
+.sc-cab{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center} .sc-cab .mn{font-weight:700;min-width:0}
+.sc-det{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;font-size:13px;color:var(--tinta-2)}
 .alertas li{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;padding:8px 0;font-size:14px;align-items:start;border-bottom:1px solid var(--raya-2)}
 .alertas li:last-child{border-bottom:0}
 .alertas .ico{font-weight:800;text-align:center;border-radius:50%;width:20px;height:20px;line-height:20px;font-size:12px}
@@ -454,7 +460,7 @@ details.metodo summary{cursor:pointer;font-weight:700;color:var(--tinta)}
   function arrancar(datos){
     window.DATOS = datos;
     document.getElementById("bloqueo").hidden = true;
-    const s = document.createElement("script"); s.src = "app.js?v=f9460a2002"; document.body.appendChild(s);
+    const s = document.createElement("script"); s.src = "app.js?v=5d1f255035"; document.body.appendChild(s);
   }
   const msg = t => { document.getElementById("bloqueo-msg").textContent = t; };
   (async () => {
