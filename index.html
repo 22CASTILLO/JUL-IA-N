@@ -14,14 +14,17 @@
 <title>Finanzas de Alberto</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <!--
-  App de finanzas de Alberto · v3.0 (27/10/2026)
+  App de finanzas de Alberto · v3.1 (14/11/2026)
   - Los datos NO están aquí: están en datos.js, que genera generar_datos.py desde ../datos/.
   - Esta página solo lee window.DATOS, calcula y pinta. No modifica nada.
   - Regla de la app: ningún importe inventado. Lo que no se sabe sale como «sin importe» y no se resta.
   - v3: tres pestañas (Inicio = posición global, Pasado = lo que ya pasó, Futuro = previsión, calendario y recurrentes),
     Herramientas aparte (¿Puedo comprarlo?, Inversiones y Financiación, estas dos en desarrollo) y la posición
     líquida siempre a la vista (barra lateral en PC, barra inferior en el móvil). Los datos pendientes van en el
-    botón discreto de la cabecera. La copia de la v2.1 está en index_v2.1.html.
+    botón discreto de la cabecera.
+  - v3.1: otras cuentas sin extracto (bloque «cuentas» de config.json, p. ej. Ibercaja) en la posición líquida y en
+    «Para no quedarte en negativo»; ratios de endeudamiento sin cifra cuando no hay nómina fija activa; y contraste
+    de datos (lo que comprueba generar_datos.py) en el botón ⓘ. Copia de la v3.0: _organizador/copias_2026-11-14/.
   Mapa del código (sección <script>):
     UTILIDADES · MODELO (categorías, meses, previsión, cuadro de la hipoteca, posición líquida, patrimonio)
     · GRÁFICOS · PIEZAS · PESTAÑAS · HERRAMIENTAS · MARCO Y ARRANQUE
@@ -110,6 +113,7 @@ button,select,input{font:inherit;color:inherit}
 .cabecera .lado{display:flex;align-items:center;gap:8px}
 .frescura{font-size:13px;color:var(--tinta-2);background:var(--hoja);border:1px solid var(--raya-2);border-radius:20px;padding:5px 12px;white-space:nowrap}
 .frescura.vieja{color:var(--aviso);font-weight:700}
+.contraste-t{margin:22px 0 6px;font-size:16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .pend{position:relative;width:36px;height:36px;border-radius:50%;border:1px solid var(--raya);background:var(--hoja);color:var(--tinta-3);cursor:pointer;display:grid;place-items:center;padding:0}
 .pend .ic{width:18px;height:18px}
 .pend i{position:absolute;top:-2px;right:-2px;min-width:17px;height:17px;border-radius:9px;background:var(--oro);color:#fff;font-size:10px;font-weight:800;font-style:normal;display:grid;place-items:center;padding:0 4px}
@@ -378,7 +382,7 @@ details.metodo summary{cursor:pointer;font-weight:700;color:var(--tinta)}
   .cal .dia{min-height:58px;font-size:10px;padding:3px} .cal .it{display:none} .cal .punto{display:inline-block} .cal .neto{font-size:10px} .cal .nd{font-size:12px}
   .form-compra{grid-template-columns:1fr 1fr} .form-compra .ancho,.form-compra .botones{grid-column:1 / -1} .botones .boton{flex:1}
   .compos .fila{grid-template-columns:64px minmax(0,1fr) auto}
-  .frescura{display:none}
+  .frescura{display:none} .frescura.vieja{display:block;font-size:11px;padding:3px 8px}
   .proximo b{padding-right:0} .proximo .chip{position:static;margin-bottom:6px}
   table{font-size:13px} th,td{padding:7px 4px}
 }
@@ -460,7 +464,7 @@ details.metodo summary{cursor:pointer;font-weight:700;color:var(--tinta)}
   function arrancar(datos){
     window.DATOS = datos;
     document.getElementById("bloqueo").hidden = true;
-    const s = document.createElement("script"); s.src = "app.js?v=894f671d6b"; document.body.appendChild(s);
+    const s = document.createElement("script"); s.src = "app.js?v=fe2820aedd"; document.body.appendChild(s);
   }
   const msg = t => { document.getElementById("bloqueo-msg").textContent = t; };
   (async () => {

@@ -233,6 +233,7 @@ function datosQueFaltan(){
     if (v.es_cargo && v.importe == null) falta.push("importe");
     if (falta.length) items.push({t: v.nombre, q: "Falta: " + falta.join(" e "), i: v.nota || ""});
   }
+  for (const c of otrasCuentas().filter(c => c.saldo == null)) items.push({t: c.nombre, q: "Falta: saldo y fecha del dato", i: c.nota || ""});
   for (const b of C.bienes.filter(b => b.valor == null)) items.push({t: b.nombre, q: "Falta: valor actual", i: b.nota || ""});
   for (const q of C.preguntas || []) items.push({t: q.texto, q: "", i: q.por_que || ""});
   return items;
@@ -248,9 +249,18 @@ function cuotaEn(f, d){
 function filaCuadro(deu, d){ let r = null; for (const x of deu.cuadro || []) if (leer(x.fecha) <= d) r = x; return r; }
 const pendienteDe = deu => { const x = deu.cuadro ? filaCuadro(deu, BASE) : null; return x ? x.pendiente : deu.pendiente; };
 
+// --- Otras cuentas (config.cuentas, opcional): no entran en la previsión de la cuenta principal, pero sí en lo que tienes
+const otrasCuentas = () => (C.cuentas || []).filter(c => c.activa !== false);
+const saldoOtras = () => r2(otrasCuentas().filter(c => c.saldo != null).reduce((a, c) => a + c.saldo, 0));
+// --- Sin nómina fija activa (cambio de empleo): los ratios sobre ingresos no se calculan, en vez de dar una cifra absurda
+const hayNomina = () => C.fijos.some(f => f.activo !== false && f.tipo === "ingreso" && f.importe != null && /n[oó]mina/i.test(f.id + " " + f.nombre));
+const SIN_NOMINA = "Sin nómina fija activa: se calcula cuando entre la nueva";
+
 // --- Posición líquida: cuenta + todo lo que es medianamente líquido (efectivo, capital social, fondos, acciones). El piso no.
 function posicionLiquida(){
-  const partes = [{id: "cuenta", n: "Cuenta Caja Rural", v: ULT.saldo, d: "Real a " + corta(BASE), ic: "cuenta"}];
+  const partes = [{id: "cuenta", n: (C.cuenta_principal && C.cuenta_principal.nombre) || "Cuenta Caja Rural", v: ULT.saldo, d: "Real a " + corta(BASE), ic: "cuenta"}];
+  // Otras cuentas sin extracto cargado (p. ej. Ibercaja): saldo que da Alberto o un documento, con su fecha
+  for (const c of otrasCuentas()) partes.push({id: c.id, n: c.nombre, v: c.saldo, d: c.saldo == null ? "Falta el saldo" : "Dato del " + corta(leer(c.a_fecha)) + (c.fuente ? " · " + c.fuente : ""), ic: "cuenta"});
   for (const b of C.bienes) if (b.liquido) partes.push({id: b.id, n: b.nombre, v: b.valor, d: b.nota || "", ic: b.id === "efectivo" ? "liquidez" : "escudo"});
   const inv = C.inversiones || [];
   if (inv.length) for (const i of inv) partes.push({id: i.id, n: i.nombre, v: i.valor, d: i.nota || "", ic: "inversiones"});
@@ -513,6 +523,7 @@ function bloqueSinCubrir(p){
     <p class="sub">Primer cargo sin saldo: <b>${esc(s.primero.concepto)}</b>, el ${corta(s.primero.fecha)}${varios ? `. Ese día hay ${s.mismoDia.length} cargos y no se sabe cuál pasa antes: cuenta con tenerlos todos (${eur(s.faltaPrimerDia)})` : ""}.${s.vuelve ? ` Vuelves a positivo el ${corta(s.vuelve.fecha)} con la entrada «${esc(s.vuelve.concepto)}».` : ""}</p>
     <ul class="sc-lista">${s.cargos.map(e => { const g = GRAV[e.si.gravedad] || GRAV.media; return `<li><div class="sc-cab"><span class="fd"><b>${e.fecha.getDate()}</b>${MESES[e.fecha.getMonth()]}</span><span class="mn">${esc(e.concepto)}</span><b class="num">${eur(e.importe, true)}</b></div>
       <div class="sc-det"><span class="chip ${g[0]}">${g[1]}</span><span>Faltan <b class="num">${eur(-e.saldo)}</b> · ${esc(e.si.texto)}</span></div></li>`; }).join("")}</ul>
+    ${otrasCuentas().length ? `<p class="sub">${otrasCuentas().map(c => c.saldo == null ? `En <b>${esc(c.nombre)}</b> no sé cuánto tienes: dile el saldo al agente.` : `En <b>${esc(c.nombre)}</b> tienes <b class="num">${eur(c.saldo)}</b> (dato del ${corta(leer(c.a_fecha))}): ${c.saldo >= s.falta ? "cubre lo que falta si lo traspasas a tiempo" : "no llega para cubrir lo que falta"}.`).join(" ")}</p>` : ""}
     <p class="nota">Sin contar el día a día ni cargos sin importe. Si traes el dinero de otro banco, una transferencia normal tarda un día hábil. Lo que pasa si se devuelve es la regla general: confírmalo con la entidad.</p>
   </section>`;
 }
@@ -543,12 +554,12 @@ function vistaInicio(el){
   const nom = proxNomina(p), hastaNom = nom ? prevision(entre(BASE, nom.fecha)) : null, mn = hastaNom ? hastaNom.min : p.min;
   const meses = resumenMeses(), mes = meses[meses.length - 1], cerr = meses.filter(m => m.completo).pop();
   const colMeses = Math.max(0, p.min.saldo) / C.reglas.gastos_fijos_mensuales_colchon, objetivo = C.reglas.colchon_meses_estable || 3;
-  const end = fm.ing ? fm.deuda / fm.ing * 100 : null, lim = C.reglas.tasa_esfuerzo_max_pct;
+  const end = fm.ing && hayNomina() ? fm.deuda / fm.ing * 100 : null, lim = C.reglas.tasa_esfuerzo_max_pct;
   const hip = P.deudas.find(d => d.id === "hipoteca"), filaH = hip && hip.cuadro ? filaCuadro(hip, BASE) : null;
   const avs = avisos(p);
   // Composición: lo que tienes frente a lo que debes
   const tienes = [{n: "Liquidez", v: P.liq.total, c: "#7fd8b5"}, ...P.inm.map(b => ({n: b.id === "piso" ? "Piso" : b.nombre, v: b.valor, c: "#e9c98a"}))];
-  const debes = [...P.deudas.map(d => ({n: d.id === "hipoteca" ? "Hipoteca" : d.nombre.replace("Devolución a mi ", ""), v: d.viva, c: d.id === "hipoteca" ? "#ff9f8f" : "#ffc8bd"})), ...(P.liq.comprometido ? [{n: "Honorarios", v: P.liq.comprometido, c: "#f7d6cf"}] : [])];
+  const debes = [...P.deudas.map(d => ({n: d.id === "hipoteca" ? "Hipoteca" : d.nombre.replace("Devolución a mi ", ""), v: d.viva, c: d.id === "hipoteca" ? "#ff9f8f" : "#ffc8bd"})), ...(P.liq.comprometido ? [{n: "Pagos comprometidos", v: P.liq.comprometido, c: "#f7d6cf"}] : [])];
   const tope = Math.max(P.activos, P.pasivos);
   const barra = l => `<div class="barra">${l.map(x => `<i style="width:${x.v / tope * 100}%;background:${x.c}" title="${esc(x.n)} ${eur0(x.v)}"></i>`).join("")}</div>`;
   el.innerHTML = `
@@ -570,7 +581,7 @@ function vistaInicio(el){
       <div class="tile ${colMeses < objetivo ? "alerta" : "ok"} con-anillo">${anillo(colMeses / objetivo, colMeses >= objetivo ? "var(--bien)" : colMeses >= objetivo / 2 ? "var(--aviso)" : "var(--critico)", colMeses.toFixed(1).replace(".", ","))}
         <div><div class="n">Colchón en meses</div><div class="v num">${colMeses.toFixed(1).replace(".", ",")} <span class="tenue" style="font-size:14px">de ${objetivo}</span></div><div class="d">Objetivo ${eur0(colchon)}</div></div></div>
       <button class="tile ${end > lim ? "alerta" : ""}" type="button" data-ir="financiacion"><div class="n"><span class="ic">${icono("financiacion")}</span>Endeudamiento</div>
-        <div class="v num ${end > lim ? "mal" : end > lim * .85 ? "ojo" : ""}">${pct(end)}</div><div class="d">Cuotas ÷ ingresos fijos · límite ${lim} %</div></button>
+        <div class="v num ${end > lim ? "mal" : end > lim * .85 ? "ojo" : ""}">${pct(end)}</div><div class="d">${end == null ? SIN_NOMINA : `Cuotas ÷ ingresos fijos · límite ${lim} %`}</div></button>
     </div>
     <div class="mitades">
       <div class="bloque"><h3>Lo que tienes <span class="total num">${eur(P.activos)}</span></h3><ul class="movs">
@@ -763,21 +774,21 @@ function vistaInversiones(el){
 
 function vistaFinanciacion(el){
   const fm = fijosMensuales(), lim = C.reglas.tasa_esfuerzo_max_pct, hip = deudaDe("hipoteca"), piso = C.bienes.find(b => b.id === "piso");
-  const end = fm.ing ? fm.deuda / fm.ing * 100 : null, libre = r2(fm.ing * lim / 100 - fm.deuda);
+  const nom = hayNomina(), end = fm.ing && nom ? fm.deuda / fm.ing * 100 : null, libre = nom ? r2(fm.ing * lim / 100 - fm.deuda) : null;
   const f = hip && hip.cuadro ? filaCuadro(hip, BASE) : null, viva = hip ? pendienteDe(hip) : 0;
   const sig = hip && hip.cuadro ? hip.cuadro.filter(x => leer(x.fecha) > BASE).slice(0, 12) : [];
   const intAnio = r2(sig.reduce((a, x) => a + x.intereses, 0)), capAnio = r2(sig.reduce((a, x) => a + x.amortizacion, 0));
   const viv = C.fijos.filter(x => ["hipoteca", "comunidad"].includes(x.id) && x.importe != null).reduce((a, x) => a + x.importe, 0);
   const ratios = [
     {n: "Tasa de esfuerzo", v: end, lim, f: "Cuotas de deuda ÷ ingresos fijos"},
-    {n: "Vivienda sobre ingresos", v: fm.ing ? viv / fm.ing * 100 : null, lim, f: "Hipoteca + comunidad ÷ ingresos fijos"},
+    {n: "Vivienda sobre ingresos", v: fm.ing && nom ? viv / fm.ing * 100 : null, lim, f: "Hipoteca + comunidad ÷ ingresos fijos"},
     {n: "LTV del piso", v: hip && piso ? viva / piso.valor * 100 : null, lim: 80, f: "Hipoteca pendiente ÷ precio de compra"},
   ];
   el.innerHTML = `
     ${enDesarrollo("Financiación · en desarrollo", "Aquí calcularemos cuándo puedes volver a financiar una casa o un piso, con un scoring como el de los bancos y tu tasa de esfuerzo. Por ahora, tus ratios reales y la hipoteca.")}
     <div class="cifras">
-      <div class="tile ${end > lim ? "alerta" : ""}"><div class="n"><span class="ic">${icono("financiacion")}</span>Tasa de esfuerzo</div><div class="v num ${end > lim ? "mal" : ""}">${pct(end)}</div><div class="d">Límite ${lim} %</div></div>
-      <div class="tile"><div class="n"><span class="ic">${icono("cuenta")}</span>Cuota libre hasta el ${lim} %</div><div class="v num ${libre < 0 ? "mal" : ""}">${eur0(libre)}<span class="tenue" style="font-size:14px">/mes</span></div><div class="d">Con tus ingresos fijos de hoy</div></div>
+      <div class="tile ${end > lim ? "alerta" : ""}"><div class="n"><span class="ic">${icono("financiacion")}</span>Tasa de esfuerzo</div><div class="v num ${end > lim ? "mal" : ""}">${pct(end)}</div><div class="d">${nom ? `Límite ${lim} %` : SIN_NOMINA}</div></div>
+      <div class="tile"><div class="n"><span class="ic">${icono("cuenta")}</span>Cuota libre hasta el ${lim} %</div><div class="v num ${libre < 0 ? "mal" : ""}">${libre == null ? "—" : eur0(libre) + `<span class="tenue" style="font-size:14px">/mes</span>`}</div><div class="d">${nom ? "Con tus ingresos fijos de hoy" : SIN_NOMINA}</div></div>
       <div class="tile"><div class="n"><span class="ic">${icono("escudo")}</span>Hipoteca pendiente</div><div class="v num">${eur0(viva)}</div><div class="d">${f ? "Tras la cuota del " + corta(leer(f.fecha)) : ""}</div></div>
       <div class="tile"><div class="n"><span class="ic">${icono("pasado")}</span>Próximos 12 meses</div><div class="v num">${eur0(intAnio)}</div><div class="d">de intereses · ${eur0(capAnio)} de capital</div></div>
     </div>
@@ -1025,10 +1036,18 @@ function hojaLiquidez(){
     ${L.comprometido ? `<li class="mov ven"><span class="mi">!</span><span class="mc"><span class="mn">Comprometido</span><span class="ms">Pagos pendientes de cargo</span></span><span class="mv"><b class="num">${eur(-L.comprometido)}</b></span></li>` : ""}</ul>
     ${L.comprometido ? `<ul class="lista" style="margin-top:6px;border-top:2px solid var(--tinta)"><li><span class="nom">Libre de compromisos</span><span class="val num ${L.libre < 0 ? "mal" : ""}">${eur(L.libre)}</span></li></ul>` : ""}`);
 }
+// Contraste de datos: lo que generar_datos.py ha comprobado al generar datos.js (cuadre, fijos frente al extracto, categorías…)
+function htmlContraste(){
+  const k = D.comprobaciones; if (!k) return "";
+  const av = k.avisos || [];
+  return `<h3 class="contraste-t">Contraste de datos <span class="chip ${av.length ? "oro" : ""}">${av.length ? plural(av.length, "aviso", "avisos") : "Todo cuadra"}</span></h3>
+    <p class="sub">${plural(k.hechas || 0, "comprobación", "comprobaciones")} al generar los datos (${esc((D.generado || "").slice(0, 10).split("-").reverse().join("/"))}): el saldo encadena apunte a apunte, cada fijo se compara con el extracto y nada lleva importe sin fuente.</p>
+    ${av.length ? `<ul class="alertas">${av.map(a => `<li class="aviso"><span class="ico" aria-hidden="true">!</span><span>${esc(a)}</span></li>`).join("")}</ul>` : ""}`;
+}
 function hojaPendientes(){
   const items = datosQueFaltan();
-  abrirHoja("Datos pendientes", items.length ? `<p class="sub">Cuando lo sepas, díselo al agente y desaparece de aquí.</p><ul class="lista">${items.map(i => `<li><span class="nom">${esc(i.t)}</span><span></span>${i.q ? `<span class="det">${esc(i.q)}</span>` : ""}${i.i ? `<span class="det tenue">${esc(i.i)}</span>` : ""}</li>`).join("")}</ul>`
-    : `<p class="sub">No falta nada. Las tarjetas y las ruedas se esperan al extracto.</p>`);
+  abrirHoja("Datos pendientes", (items.length ? `<p class="sub">Cuando lo sepas, díselo al agente y desaparece de aquí.</p><ul class="lista">${items.map(i => `<li><span class="nom">${esc(i.t)}</span><span></span>${i.q ? `<span class="det">${esc(i.q)}</span>` : ""}${i.i ? `<span class="det tenue">${esc(i.i)}</span>` : ""}</li>`).join("")}</ul>`
+    : `<p class="sub">No falta nada. Las tarjetas y las ruedas se esperan al extracto.</p>`) + htmlContraste());
 }
 function hojaHerramientas(){
   abrirHoja("Herramientas", `<div class="herr">${HERRAMIENTAS.map(([k, n, d, dev]) => `<button type="button" data-tab="${k}" aria-current="${k === ACTUAL ? "page" : "false"}"><span class="ic">${icono(k === "comprar" ? "comprar" : k)}</span><span>${n}<small>${d}</small></span>${dev ? `<span class="chip oro dev">En desarrollo</span>` : ""}</button>`).join("")}</div>`);
@@ -1038,9 +1057,9 @@ function pintar(){
   const dias = entre(BASE, HOY), fr = $("frescura");
   fr.textContent = "Datos al " + corta(BASE) + (dias > 0 ? " · hace " + plural(dias, "día", "días") : "");
   fr.classList.toggle("vieja", dias > 7);
-  const nP = datosQueFaltan().length;
+  const nP = datosQueFaltan().length + ((D.comprobaciones && D.comprobaciones.avisos) || []).length;
   $("pend").innerHTML = `<span class="ic">${icono("info")}</span>${nP ? `<i>${nP}</i>` : ""}`;
-  $("pend").setAttribute("aria-label", nP ? `${nP} datos pendientes` : "Datos pendientes");
+  $("pend").setAttribute("aria-label", nP ? `${nP} datos pendientes o avisos` : "Datos pendientes");
   $("titulo").textContent = $("titulo-pc").textContent = TITULOS[ACTUAL];
   document.title = TITULOS[ACTUAL] + " · Finanzas de Alberto";
   const btn = ([k, n, , dev]) => `<button type="button" data-tab="${k}" aria-current="${k === ACTUAL ? "page" : "false"}"><span class="ic">${icono(k)}</span>${n}${dev ? `<span class="dev">Pronto</span>` : ""}</button>`;
