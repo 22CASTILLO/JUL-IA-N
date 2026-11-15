@@ -14,7 +14,7 @@
 <title>Finanzas de Alberto</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <!--
-  App de finanzas de Alberto · v4.0 (14/11/2026)
+  App de finanzas de Alberto · v5.0 (15/11/2026): Inicio simple (saldo por banco, aviso solo si no llegas en 30 días, una cifra mensual)
   - Los datos NO están aquí: están en datos.js, que genera generar_datos.py desde ../datos/.
   - Esta página solo lee window.DATOS, calcula y pinta. No modifica nada.
   - Regla de la app: ningún importe inventado. Lo que no se sabe sale como «sin importe» y no se resta.
@@ -147,6 +147,9 @@ button,select,input{font:inherit;color:inherit}
 .pill b{color:#fff;font-size:13px} .pill.rojo{background:rgba(255,120,110,.22)} .pill.rojo b{color:#ffd5cf}
 .h-hor{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
+.tile.solo{display:block;width:100%}
+.aviso-mes{background:var(--critico-suave,#fdecea);border:1px solid var(--critico,#c0392b);border-radius:var(--radio);padding:12px 14px;color:var(--critico,#c0392b)}
+.aviso-mes p{margin:4px 0 0;color:inherit;font-size:14px}
 .cifras{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .tile{background:var(--hoja);border:1px solid var(--raya-2);border-radius:var(--radio);padding:13px 14px;min-width:0;text-align:left}
 button.tile{cursor:pointer;font:inherit;color:inherit}
@@ -476,7 +479,7 @@ details.metodo summary{cursor:pointer;font-weight:700;color:var(--tinta)}
   function arrancar(datos){
     window.DATOS = datos;
     document.getElementById("bloqueo").hidden = true;
-    const s = document.createElement("script"); s.src = "app.js?v=4e9c343232"; document.body.appendChild(s);
+    const s = document.createElement("script"); s.src = "app.js?v=6deee157ab"; document.body.appendChild(s);
   }
   const msg = t => { document.getElementById("bloqueo-msg").textContent = t; };
   (async () => {

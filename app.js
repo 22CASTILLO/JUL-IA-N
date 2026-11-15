@@ -701,77 +701,38 @@ function listaFijos(sel, largo){
    Arriba se elige «Todas» o un banco (SEL). Lo que es del dinero en cuentas (saldo, movimientos, previsión, resultado
    del mes) cambia con esa elección. Lo que es de todo tu dinero (patrimonio, deudas, colchón, endeudamiento) solo sale en «Todas».
    ========================================================= */
-// INICIO: la foto de hoy. Cuánto hay y dónde, si llegas, el mes, lo próximo y las alertas.
+// INICIO (v5): lo mismo que una app de banca. Cuánto hay, aviso SOLO si no llegas en ~1 mes, la diferencia fija del mes y lo próximo.
+const MES_AVISO = 30;
+function alertaLlegas(sel){
+  const T = tensiones(MES_AVISO, sel), p = prevision(MES_AVISO, null, sel);
+  let h = "";
+  for (const t of T){
+    const s = t.s, ayuda = t.ayudas.find(a => a.cubre);
+    h += `<section class="aviso-mes" role="alert"><b>${MULTI ? esc(t.c.nombre) + " se queda" : "Te quedas"} en negativo el ${corta(s.primero.fecha)}</b>
+      <p>Ten <b class="num">${eur(s.falta)}</b> más ${plazo(s, true)}${ayuda ? ` · pásalos desde ${esc(ayuda.c.nombre)}` : ""}.</p></section>`;
+  }
+  if (!T.length && p.min && p.min.saldo < 0) h += `<section class="aviso-mes" role="alert"><b>No llegas: el ${corta(p.min.fecha)} quedas en ${eur(p.min.saldo)}</b></section>`;
+  return h;
+}
 function vistaInicio(el){
-  const sel = SEL(), todas = sel === "todas", c = todas ? null : cuentaDe(sel), H = ESTADO.horizonte;
-  const p = prevision(H, null, sel), T = tensiones(H, sel), v = veredicto(p, T), avs = avisos(p, sel, T);
-  const nom = proxNomina(p), dN = nom ? Math.max(1, entre(BASE, nom.fecha)) : H, pN = nom ? prevision(dN, null, sel) : p, vN = nom ? veredicto(pN, tensiones(dN, sel)) : v, mn = pN.min;
-  const meses = resumenMeses(sel), mes = meses[meses.length - 1];
+  const sel = SEL(), todas = sel === "todas", c = todas ? null : cuentaDe(sel);
+  const p = prevision(45, null, sel), fm = fijosMensuales(sel), dif = r2(fm.ing - fm.gas);
   const proximos = p.ev.filter(e => e.certeza !== "aviso").slice(0, 5);
   const sinFecha = C.pendientes.filter(x => !x.fecha && enSel(x, sel)).map(x => x.nombre.replace(/ \(.*\)$/, ""));
-  const notaSinFecha = sinFecha.length ? `<p class="nota">Sin fecha todavía (no ${sinFecha.length === 1 ? "entra" : "entran"} en la previsión): ${esc(sinFecha.join(" · "))}.</p>` : "";
-  const tLlegas = `<button class="tile ${vN.clase === "malo" ? "alerta" : ""}" type="button" data-ir="futuro"><div class="n">${nom ? "Hasta la nómina del " + corta(nom.fecha) : "Próximos " + H + " días"}</div>
-      <div class="v ${vN.clase === "malo" ? "mal" : ""}">${mn ? vN.t : "¿?"}</div><div class="d">${mn ? "Día más justo: " + eur0(mn.saldo) + " el " + corta(mn.fecha) : "Falta el saldo"}</div></button>`;
-  const tMes = mes ? `<button class="tile" type="button" data-ir="pasado"><div class="n">${mesCorto(mes.k)}${mes.completo ? "" : " hasta el " + mes.hasta.getDate()}</div>
-      <div class="v num ${mes.ahorro < 0 ? "mal" : "bien"}">${eur(mes.ahorro, true)}</div><div class="d">Ingresos ${eur0(mes.ingresos)} · gastos ${eur0(mes.gastos)}</div></button>`
-    : `<div class="tile"><div class="n">Este mes</div><div class="v tenue">—</div><div class="d">Sin movimientos todavía</div></div>`;
-  let h = "";
-  if (todas){
-    const P = patrimonio(), colchon = COLCHON_BASE(), fm = fijosMensuales(), objetivo = C.reglas.colchon_meses_estable || 3;
-    const colMeses = Math.max(0, p.min.saldo) / C.reglas.gastos_fijos_mensuales_colchon;
-    const end = fm.ing && hayNomina() ? fm.deuda / fm.ing * 100 : null, lim = C.reglas.tasa_esfuerzo_max_pct;
-    const faltan = CUENTAS.filter(q => q.saldo == null).map(q => q.nombre);
-    const aCero = P.liq.partes.filter(x => !x.c && x.v === 0).map(x => x.n);   // lo que está a cero no ocupa una fila
-    const tarjeta = q => { const t = T.find(t => t.c.id === q.id), e = q.saldo == null ? ["neutro", "Sin datos"] : t ? (t.cubierto ? ["justo", "Con traspaso"] : ["malo", "Corta el " + corta(t.s.primero.fecha)]) : ["", "Llega"];
-      return `<button class="cta ${q.cls}" type="button" data-cuenta="${esc(q.id)}" aria-label="Ver solo ${esc(q.nombre)}"><span class="cta-n"><span class="pb"></span>${esc(q.nombre)}</span><span class="cta-v num">${eurS(q.saldo)}</span><span class="cta-d">${esc(origenTxt(q))}</span><span class="cta-e ${e[0]}"><i></i>${e[1]}</span></button>`; };
-    h += `<div class="heroe b-neutro ${MULTI ? "con-cuentas" : ""}">
-      <div><div class="h-top"><div class="n">${MULTI ? "Disponible en tus cuentas" : "Saldo en " + esc(PRI.nombre)}</div><span class="estado ${v.clase}"><i></i>${v.t}</span></div>
-        <div class="grande num">${eur(P.liq.enCuentas)}</div>
-        <div class="h-sub">${esc(v.h)}${faltan.length ? " · sin contar " + esc(faltan.join(" ni ")) + " (falta el saldo)" : ""}</div></div>
-      ${MULTI ? `<div class="h-cuentas">${CUENTAS.map(tarjeta).join("")}</div>` : ""}
-      <div class="pills"><span class="pill">Patrimonio neto <b class="num">${eur0(P.neto)}</b></span><span class="pill">Líquido total <b class="num">${eur0(P.liq.total)}</b></span>${P.liq.comprometido ? `<span class="pill">Comprometido <b class="num">${eur0(P.liq.comprometido)}</b></span>` : ""}</div>
+  const P = patrimonio(), enCuentas = P.liq.enCuentas;
+  const tarjeta = q => `<button class="cta ${q.cls}" type="button" data-cuenta="${esc(q.id)}" aria-label="Ver solo ${esc(q.nombre)}"><span class="cta-n"><span class="pb"></span>${esc(q.nombre)}</span><span class="cta-v num">${eurS(q.saldo)}</span></button>`;
+  let h = `<div class="heroe ${c ? c.cls : "b-neutro"} ${todas && MULTI ? "con-cuentas" : ""}">
+      <div><div class="n">${todas ? "Tienes" : esc(c.nombre)}</div><div class="grande num">${todas ? eur(enCuentas) : eurS(c.saldo)}</div></div>
+      ${todas && MULTI ? `<div class="h-cuentas">${CUENTAS.map(tarjeta).join("")}</div>` : ""}
     </div>
-    <div class="cifras">${tLlegas}${tMes}
-      <div class="tile ${colMeses < objetivo ? "alerta" : ""} con-anillo">${anillo(colMeses / objetivo, colMeses >= objetivo ? "var(--bien)" : colMeses >= objetivo / 2 ? "var(--aviso)" : "var(--critico)")}
-        <div><div class="n">Colchón en meses</div><div class="v num">${colMeses.toFixed(1).replace(".", ",")} <span class="tenue" style="font-size:14px">de ${objetivo}</span></div><div class="d">Objetivo ${eur0(colchon)}</div></div></div>
-      <button class="tile ${end > lim ? "alerta" : ""}" type="button" data-ir="financiacion"><div class="n">Endeudamiento</div>
-        <div class="v num ${end > lim ? "mal" : end > lim * .85 ? "ojo" : ""}">${pct(end)}</div><div class="d">${end == null ? SIN_NOMINA : `Cuotas ÷ ingresos fijos · límite ${lim} %`}</div></button>
-    </div>
-    ${bloqueSinCubrir(T, true)}
-    <div class="dos">
-      <div class="bloque"><h3>Lo próximo <button class="enlace" type="button" data-ir="futuro">Ver todo</button></h3>${proximos.length ? `<ul class="movs">${proximos.map(e => filaMov(e, false, MULTI)).join("")}</ul>` : `<p class="sub">Nada previsto en ${H} días.</p>`}${notaSinFecha}</div>
-      <div class="bloque"><h3>Alertas <span class="chip ${avs.some(a => a.nivel === "grave") ? "rojo" : ""}">${avs.length}</span></h3>${avs.length ? listaAlertas(avs.slice(0, 4)) + (avs.length > 4 ? `<details class="mas"><summary>Ver ${avs.length - 4} más</summary>${listaAlertas(avs.slice(4))}</details>` : "") : `<p class="sub">Nada que vigilar.</p>`}</div>
-    </div>
-    <div class="mitades">
-      <div class="bloque"><h3>Lo que tienes <span class="total num">${eur(P.activos)}</span></h3><ul class="movs">
-        ${P.liq.partes.filter(x => x.c || x.v !== 0).map(x => `<li class="mov ${x.c ? "cta-f " + x.c.cls : "ing"}"><span class="mi">${icono(x.ic)}</span><span class="mc"><span class="mn">${esc(x.n)}</span><span class="ms">${esc(x.d)}</span></span><span class="mv"><b class="num">${eurS(x.v)}</b><span>Líquido</span></span></li>`).join("")}
-        ${P.inm.map(b => `<li class="mov oro"><span class="mi">${icono("financiacion")}</span><span class="mc"><span class="mn">${esc(b.nombre)}</span><span class="ms">${esc(b.nota || "")}</span></span><span class="mv"><b class="num">${eur(b.valor)}</b><span>No líquido</span></span></li>`).join("")}
-      </ul>${aCero.length ? `<p class="nota">A cero ahora: ${esc(aCero.join(" · "))}.</p>` : ""}</div>
-      <div class="bloque"><h3>Lo que debes <span class="total num">${eur(-P.pasivos)}</span></h3><ul class="movs">
-        ${P.deudas.map(d => { const b = baseDeuda(d), f = d.cuadro ? filaCuadro(d, b) : null, sig = d.cuadro ? d.cuadro.find(x => leer(x.fecha) > b) : null;
-          return `<li class="mov deu"><span class="mi">${icono(d.id === "hipoteca" ? "financiacion" : "escudo")}</span><span class="mc"><span class="mn">${esc(d.nombre)}</span><span class="ms">${sig ? `Próxima cuota ${eur(sig.cuota)} el ${corta(leer(sig.fecha))} · ${eur0(sig.intereses)} de intereses` : esc(d.nota || "")}</span></span><span class="mv"><b class="num">${eur(-d.viva)}</b><span>${f ? "a " + corta(leer(f.fecha)) : "Sin cuota"}</span></span></li>`; }).join("")}
-        ${C.pendientes.filter(x => x.importe != null && x.clase !== "cobro").map(x => `<li class="mov ven"><span class="mi" aria-hidden="true">!</span><span class="mc"><span class="mn">${esc(x.nombre)}</span><span class="ms">${!x.fecha ? "Sin fecha" : leer(x.fecha) <= BASE ? "Vencido, sin cargar · reservado" : "Vence el " + corta(leer(x.fecha))}</span></span><span class="mv"><b class="num">${eur(-x.importe)}</b><span>Comprometido</span></span></li>`).join("")}
-      </ul></div>
-    </div>`;
-  } else {
-    const fm = fijosMensuales(sel), enCuentas = r2(CON_SALDO.reduce((a, q) => a + q.saldo, 0)), largo = prevision(400, null, sel), fijos = listaFijos(sel, largo);
-    h += `<div class="heroe ${c.cls}">
-      <div><div class="h-top"><div class="n">${esc(c.entidad || c.nombre)}</div><span class="estado ${v.clase}"><i></i>${v.t}</span></div>
-        <div class="grande num">${eurS(c.saldo)}</div>
-        <div class="h-sub">${c.saldo == null ? "Dile al agente cuánto hay y a qué fecha, o pásale el extracto, y aquí verás si llega." : esc(origenTxt(c)) + " · " + esc(v.h)}</div></div>
-      ${c.saldo == null ? "" : `<div class="pills"><span class="pill">Día más justo <b class="num">${eur0(p.min.saldo)}</b> ${corta(p.min.fecha)}</span><span class="pill">Saldo el ${corta(p.fin)} <b class="num">${eur0(p.final)}</b></span>${enCuentas > 0 && CON_SALDO.length > 1 ? `<span class="pill">De tu dinero en cuentas <b class="num">${pct(c.saldo / enCuentas * 100)}</b></span>` : ""}</div>`}
-    </div>
-    <div class="cifras">${tLlegas}${tMes}
-      <div class="tile"><div class="n">Entra fijo al mes</div><div class="v num ${fm.ing ? "bien" : "tenue"}">${fm.ing ? eur(fm.ing, true) : "—"}</div><div class="d">${fm.ing ? "Lo que se cobra aquí cada mes" : "Nada fijo se cobra aquí"}</div></div>
-      <div class="tile"><div class="n">Sale fijo al mes</div><div class="v num ${fm.gas ? "" : "tenue"}">${fm.gas ? eur(-fm.gas) : "—"}</div><div class="d">${fm.n ? plural(fm.n, "recibo fijo", "recibos fijos") + " · sin tarjetas" : "Ningún recibo domiciliado aquí"}</div></div>
-    </div>
-    ${bloqueSinCubrir(T, true)}
-    <div class="dos">
-      <div class="bloque"><h3>Lo próximo en ${esc(c.nombre)} <button class="enlace" type="button" data-ir="futuro">Ver todo</button></h3>${proximos.length ? `<ul class="movs">${proximos.map(e => filaMov(e, c.saldo != null, false)).join("")}</ul>` : `<p class="sub">Nada previsto en ${H} días.</p>`}${notaSinFecha}</div>
-      <div class="bloque"><h3>Alertas <span class="chip ${avs.some(a => a.nivel === "grave") ? "rojo" : ""}">${avs.length}</span></h3>${avs.length ? listaAlertas(avs) : `<p class="sub">Nada que vigilar.</p>`}</div>
-    </div>
-    <div class="bloque"><h3>Qué se cobra y se paga aquí</h3>${fijos ? `<ul class="movs">${fijos}</ul>` : `<p class="sub">Todavía no hay nada fijo en ${esc(c.nombre)}. Cuando domicilies algo o cobres aquí la nómina, díselo al agente.</p>`}${c.nota ? `<p class="nota">${esc(c.nota)}</p>` : ""}</div>`;
-  }
+    ${alertaLlegas(sel)}
+    <button class="tile solo ${dif < 0 ? "alerta" : ""}" type="button" data-ir="futuro"><div class="n">Cada mes, lo fijo</div><div class="v num ${dif < 0 ? "mal" : "bien"}">${eur(dif, true)}</div><div class="d">${dif < 0 ? "Sale más de lo que entra" : "Entra más de lo que sale"}</div></button>
+    <div class="bloque"><h3>Lo próximo <button class="enlace" type="button" data-ir="futuro">Ver todo</button></h3>${proximos.length ? `<ul class="movs">${proximos.map(e => filaMov(e, false, MULTI && todas)).join("")}</ul>` : `<p class="sub">Nada previsto.</p>`}
+      ${sinFecha.length ? `<p class="nota">Sin saber todavía: ${esc(sinFecha.join(" · "))}</p>` : ""}</div>`;
+  if (todas) h += `<details class="metodo"><summary>Patrimonio</summary><ul class="lista">
+      <li><span class="nom">Tienes</span><span class="val num">${eur(P.activos)}</span></li>
+      ${P.deudas.map(d => `<li><span class="nom">${esc(d.nombre)}</span><span class="val num">${eur(-d.viva)}</span></li>`).join("")}
+      <li><span class="nom"><b>Patrimonio neto</b></span><span class="val num ${P.neto < 0 ? "mal" : ""}"><b>${eur(P.neto)}</b></span></li></ul></details>`;
   el.innerHTML = h;
 }
 
@@ -814,12 +775,7 @@ function vistaPasado(el){
   el.innerHTML = `
     <div class="controles">${seg("mespas", Object.fromEntries([...meses.map(x => [x.k, mesCorto(x.k) + (x.completo ? "" : "*")]), ["todo", "Todo"]]), ESTADO.mesPasado)}
       <span class="tenue" style="font-size:13px">${todo ? "Del " + corta(primera) + " al " + corta(ultima) : m.completo ? "Mes completo" : "* Hasta el " + corta(m.hasta)}</span></div>
-    <div class="cifras">
-      <div class="tile"><div class="n">Ingresos</div><div class="v num positivo">${eur(ing, true)}</div><div class="d">Nómina, alquileres y otros</div></div>
-      <div class="tile"><div class="n">Gastos</div><div class="v num">${eur(-gas)}</div><div class="d">Sin compra del piso ni traspasos</div></div>
-      <div class="tile ${res < 0 ? "alerta" : ""}"><div class="n">Resultado</div><div class="v num ${res < 0 ? "mal" : "bien"}">${eur(res, true)}</div><div class="d">${res < 0 ? "Salió más de lo que entró" : ing ? "Ahorro " + pct(res / ing * 100) : "—"}</div></div>
-      <div class="tile"><div class="n">Día a día</div><div class="v num">${eur0(totalDia)}</div><div class="d">${eur(r2(totalDia / Math.max(1, nDias)))} de media al día</div></div>
-    </div>
+    <div class="tile solo ${res < 0 ? "alerta" : ""}"><div class="n">${todo ? "Todo el periodo" : mesCorto(m.k)}</div><div class="v num ${res < 0 ? "mal" : "bien"}">${eur(res, true)}</div><div class="d">Entró ${eur0(ing)} · salió ${eur0(gas)}</div></div>
     ${conBanco ? `<div class="bloque"><h3>Por banco <span class="chip">Gastos de ${nombrePeriodo}</span></h3>
       ${conGastos.length ? `<div class="reparto" role="img" aria-label="Reparto de los gastos: ${esc(conGastos.map(b => b.q.nombre + " " + pct(b.gastos / gas * 100)).join(", "))}">${conGastos.map(b => `<i class="${b.q.cls}" style="flex:${b.gastos}"></i>`).join("")}</div>` : ""}
       <ul class="bancos">${bancos.map(b => `<li><button type="button" data-cuenta="${esc(b.q.id)}" aria-label="Ver solo ${esc(b.q.nombre)}"><span class="bn ${b.q.cls}"><span class="pb"></span>${esc(b.q.nombre)}</span>${b.n
@@ -908,20 +864,14 @@ function vistaFuturo(el){
   const pend = C.pendientes.filter(x => enSel(x, sel)), venc = C.vencimientos.filter(x => enSel(x, sel)), fijos = listaFijos(sel, largo);
   const bancoDe = x => conBanco ? punto(cuentaDe(idCuenta(x))) + esc(cuentaDe(idCuenta(x)).nombre) + " · " : "";
   el.innerHTML = `
-    <div class="heroe ${c ? c.cls : "b-neutro"}">
-      <div><div class="h-top"><div class="n">${p.min ? "Día más justo · " + corta(p.min.fecha) : esc(c ? c.nombre : "Previsión")}${c && p.min ? " · " + esc(c.nombre) : ""}</div><span class="estado ${v.clase}"><i></i>${v.t}</span></div>
-        <div class="grande num">${p.min ? eur(p.min.saldo) : "¿?"}</div>
-        <div class="h-sub">${esc(v.h)}${todas && p.sinSaldo.length ? " · sin contar " + esc(p.sinSaldo.map(q => q.nombre).join(" ni ")) : ""}</div></div>
-      ${p.min ? `<div class="pills">${nom ? `<span class="pill">Nómina <b class="num">${eur(nom.importe, true)}</b> ${corta(nom.fecha)}</span>` : ""}<span class="pill">Saldo el ${corta(p.fin)} <b class="num">${eur0(p.final)}</b></span>${tj ? `<span class="pill rojo">Tarjetas ${corta(tj.fecha)} <b>sin restar</b></span>` : ""}</div>` : ""}
-      <div class="h-hor"><span class="n">Hasta dónde mirar</span>${selectorHorizonte()}</div>
-    </div>
-    ${bloqueSinCubrir(T, false)}
+    <div class="controles"><span class="n tenue">Mirar</span>${selectorHorizonte()}</div>
+    ${alertaLlegas(sel)}
     ${p.min ? `<figure class="grafico"><div class="tit">Saldo previsto${c ? " en " + esc(c.nombre) : ""}</div>${leyendaSaldo(opc)}<div class="hueco"></div></figure>` : vacio(`Falta el saldo de ${esc(c ? c.nombre : "la cuenta")}`, "Dile al agente cuánto hay y a qué fecha, o pásale el extracto, y aquí saldrá la previsión.")}
     <div class="fila-tit"><span style="font-weight:800;font-size:18px">Lo que viene</span>${seg("modo", {lista: "Lista", calendario: "Calendario"}, ESTADO.futuro)}</div>
     ${ESTADO.futuro === "calendario" ? htmlCalendario(sel) : `<div class="bloque"><ul class="movs">${lista || `<li class="sub">Nada previsto en ${H} días.</li>`}</ul>
       <p class="nota">Solo resta importes reales. Lo que no tiene cifra sale con «¿?» y no se resta. Si un día cae en fin de semana, pasa al lunes.${conBanco ? " La cifra pequeña es el total de tus cuentas después de cada movimiento." : ""}</p></div>`}
     <div class="dos">
-      <div class="bloque"><h3>Cada mes <span class="chip">Margen ${eur0(r2(fm.ing - fm.gas))}/mes</span></h3>${fijos ? `<ul class="movs">${fijos}</ul>` : `<p class="sub">Nada fijo todavía.</p>`}<p class="nota">Ingresos fijos ${eur(fm.ing)}/mes · gastos fijos ${eur(fm.gas)}/mes. Sin tarjetas ni día a día.</p></div>
+      <div class="bloque"><h3>Cada mes</h3>${fijos ? `<ul class="movs">${fijos}</ul>` : `<p class="sub">Nada fijo todavía.</p>`}</div>
       <div class="pila">
         <div class="bloque"><h3>Pagos y cobros pendientes</h3>${pend.length ? `<ul class="movs">
           ${pend.map(x => { const cobro = x.clase === "cobro", base = cuentaDe(idCuenta(x)).base || BASE;
